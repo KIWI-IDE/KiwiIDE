@@ -60,12 +60,12 @@ function connect(url) {
     const pending = new Map();
     let id = 0;
     socket.addEventListener("open", () => resolve({
-      send(method, params = {}) {
+      send(method, params = {}, timeout = 30_000) {
         const command = new Promise((resolveCommand, rejectCommand) => {
           const commandId = ++id;
           const timer = setTimeout(() => {
             if (pending.delete(commandId)) rejectCommand(new Error(`${method} hat nicht geantwortet.`));
-          }, 30_000);
+          }, timeout);
           pending.set(commandId, {
             resolve: (value) => { clearTimeout(timer); resolveCommand(value); },
             reject: (error) => { clearTimeout(timer); rejectCommand(error); },
@@ -140,8 +140,8 @@ async function withKiwi(userData, run) {
     return {
       cdp,
       id: target.id,
-      evaluate: async (expression, awaitPromise = false) => {
-        const result = await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise });
+      evaluate: async (expression, awaitPromise = false, timeout = 30_000) => {
+        const result = await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise }, timeout);
         if (result?.exceptionDetails) {
           const details = result.exceptionDetails;
           const description = details.exception?.description || details.text || "Auswertung fehlgeschlagen";
@@ -257,7 +257,8 @@ async function verifyStartup(userData, project, arrangement) {
         15_000,
         "terminal command",
       );
-      const language = await editor.evaluate(`window.kiwi.language.start(${root})`, true);
+      // A cold JDT LS may spend up to a minute initializing before it can answer.
+      const language = await editor.evaluate(`window.kiwi.language.start(${root})`, true, 120_000);
       assert.equal(language.available, true, language.reason);
     } finally {
       editor.cdp.close();
