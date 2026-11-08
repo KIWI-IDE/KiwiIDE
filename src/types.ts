@@ -1221,10 +1221,12 @@ export interface UpdateCheckResult {
   /** Opaque main-process approval. It prevents renderer-supplied executables. */
   approvalId?: string;
   releaseNotes?: string;
+  source?: "github";
+  releaseUrl?: string;
   channel?: string;
   publishedAt?: string;
   reason?: string;
-  artifactKind?: "setup" | "portable" | "renderer";
+  artifactKind?: "setup" | "portable" | "renderer" | "appimage" | "dmg";
   filename?: string;
   /** Fingerprint a renderer bundle must match to be applied without a restart. */
   mainHash?: string;
@@ -1257,7 +1259,7 @@ export interface DownloadedUpdate {
   sha256: string;
   bytes: number;
   version: string;
-  artifactKind?: "setup" | "portable" | "renderer";
+  artifactKind?: UpdateCheckResult["artifactKind"];
   cached?: boolean;
   relaunching?: boolean;
   /** True when the update was applied to the running Kiwi. */

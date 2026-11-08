@@ -213,7 +213,25 @@ Python 3, Make und einen C++-Compiler, macOS die Xcode Command Line Tools.
 - Linux: `npm run dist:linux` erstellt ein AppImage in `release/`. Mach es vor dem Start mit `chmod +x <Datei>.AppImage` ausführbar.
 - macOS: `npm run dist:mac` erstellt ein DMG in `release/`. Für die öffentliche Verteilung sind eine Developer-ID-Signatur und die Apple-Notarisierung einzurichten.
 
-Auf Linux und macOS werden Updates durch Installation des neuen Pakets eingespielt.
+## Updates über GitHub Releases
+
+Gepackte Kiwi-Versionen prüfen standardmäßig die [GitHub Releases von Kiwi IDE](https://github.com/KIWI-IDE/KiwiIDE/releases).
+Unter **Einstellungen → Allgemein → Jetzt prüfen** lässt sich die Suche jederzeit
+starten. Stable berücksichtigt reguläre Releases, Beta und Canary auch Vorabversionen.
+Kiwi prüft die Dateigröße und den von GitHub gelieferten SHA-256-Wert vor der
+Installation. Unter Windows startet Kiwi nach deiner Bestätigung das Setup oder
+aktualisiert die portable EXE. Unter Linux und macOS zeigt Kiwi das heruntergeladene
+AppImage oder DMG im Dateimanager an.
+
+Für ein Update veröffentliche einen Release mit einem Versions-Tag wie `v1.0.1`
+und hänge die unveränderten Build-Dateien direkt an den Release. Die Version im
+Dateinamen muss zum Tag passen. Für `v1.0.1` sind das diese Dateien.
+
+- Windows: `Kiwi-IDE-1.0.1-setup.exe` und `Kiwi-IDE-1.0.1-portable.exe`
+- Linux: `Kiwi-IDE-1.0.1-x86_64.AppImage` und `Kiwi-IDE-1.0.1-arm64.AppImage`
+- macOS: `Kiwi-IDE-1.0.1-x64.dmg` und `Kiwi-IDE-1.0.1-arm64.dmg`
+
+Eine eigene HTTPS-Manifest-Adresse hat unter Windows Vorrang.
 
 ## Windows-Pakete
 
@@ -228,9 +246,9 @@ absichtlich unsigniert. Für einen signierten Release-Build müssen
 `KIWI_SIGNTOOL_PATH` gesetzt sein. Mit `KIWI_REQUIRE_SIGNING=1` schlägt der
 Build fehl, falls keine verifizierte Authenticode-Signatur erzeugt werden kann.
 
-Das Update-Manifest wird als `release/latest.json` und kanalbezogen unter
-`release/manifests/<kanal>/latest.json` erzeugt. Die öffentliche HTTPS-Basis
-ist verpflichtend; Kiwi erzeugt keine Platzhalter-Adresse:
+Für einen eigenen Windows-Update-Server erzeugt Kiwi ein Manifest unter
+`release/latest.json` und kanalbezogen unter `release/manifests/<kanal>/latest.json`.
+Dafür braucht der Build die öffentliche HTTPS-Adresse des Servers.
 
 ```powershell
 $env:KIWI_UPDATE_PUBLIC_BASE_URL = "https://updates.meine-domain.de"

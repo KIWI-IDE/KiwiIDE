@@ -96,6 +96,8 @@ export function SettingsDialog({
   const [query, setQuery] = useState("");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const updateReleaseUrl = updateResult?.releaseUrl;
+  const manualUpdate = updateResult?.artifactKind === "appimage" || updateResult?.artifactKind === "dmg";
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState("");
   /** Why an imported file was not a theme. Cleared as soon as one is. */
@@ -1844,7 +1846,7 @@ export function SettingsDialog({
                     ><Copy size={13} /> {versionCopied ? t("Kopiert") : t("Versionsangaben kopieren")}</button>
                   </div>
                 </SettingsRow>
-                {window.kiwi?.platform === "win32" && <ToggleRow title="Automatische Updates" description="Prüft beim Start das HTTPS-Manifest und installiert verifizierte Updates automatisch. Reine Oberflächen-Updates werden im laufenden Programm übernommen; nur wenn sich Kiwi selbst ändert, wird still installiert und der Workspace samt Tabs wieder geöffnet." checked={settings.automaticUpdates} onChange={(automaticUpdates) => void onGlobalChange({ automaticUpdates })} />}
+                <ToggleRow title="Updates beim Start prüfen" description="Meldet neue GitHub-Releases beim Start. Ein eigenes Windows-Update-Manifest kann Updates automatisch installieren." checked={settings.automaticUpdates} onChange={(automaticUpdates) => void onGlobalChange({ automaticUpdates })} />
                 <SettingsRow title="Beim Start" description="Zuletzt geöffnetes Projekt wiederherstellen oder immer mit der Projektliste beginnen.">
                   <select value={settings.startupBehavior} onChange={(event) => void onGlobalChange({ startupBehavior: event.target.value as IdeSettings["startupBehavior"] })}>
                     <option value="restore">{t("Letztes Projekt öffnen")}</option>
@@ -1870,10 +1872,9 @@ export function SettingsDialog({
                     spellCheck={false}
                   />
                 </SettingsRow>
-                {window.kiwi?.platform === "win32" && <>
                 <SettingsRow
                   title="Update-Kanal"
-                  description="Stable erhält reguläre Versionen, Beta zusätzlich Vorabversionen, Canary dieselben früher und ohne Zusage, dass eine davon bleibt."
+                  description="Stable erhält reguläre Versionen. Beta und Canary berücksichtigen auch GitHub-Vorabversionen."
                 >
                   <select value={settings.updateChannel} onChange={(event) => void onGlobalChange({ updateChannel: event.target.value as IdeSettings["updateChannel"] })}>
                     <option value="stable">{t("Stable")}</option>
@@ -1881,34 +1882,47 @@ export function SettingsDialog({
                     <option value="canary">{t("Canary")}</option>
                   </select>
                 </SettingsRow>
-                <SettingsRow title="Update-Manifest" description="HTTPS-Adresse des Release-Manifests. Leer deaktiviert die Prüfung.">
+                {window.kiwi?.platform === "win32" && <SettingsRow title="Update-Manifest" description="Optionales HTTPS-Manifest für eigene Windows-Updates. Ohne eigene Adresse nutzt Kiwi GitHub Releases.">
                   <input className="settings-wide-input" type="url" value={settings.updateManifestUrl} onChange={(event) => void onGlobalChange({ updateManifestUrl: event.target.value })} placeholder={t("https://updates.example.org/kiwi.json")} />
-                </SettingsRow>
-                <SettingsRow title="Jetzt prüfen" description="Der Download wird per SHA-256 geprüft. Betrifft das Update nur die Oberfläche, übernimmt Kiwi es ohne Neustart; sonst wird die Sitzung gesichert, still installiert und ohne manuelles Zutun wieder geöffnet.">
+                </SettingsRow>}
+                <SettingsRow title="Jetzt prüfen" description="Kiwi sucht ein passendes Paket und prüft den Download per SHA-256.">
                   <div className="settings-update-actions">
                     <button
                       disabled={checkingUpdate}
                       onClick={() => {
                         setCheckingUpdate(true);
-                        void onCheckUpdates().then(setUpdateResult).finally(() => setCheckingUpdate(false));
+                        void onCheckUpdates().then(setUpdateResult).catch((error) => setUpdateResult({
+                          configured: true,
+                          available: false,
+                          currentVersion: __APP_VERSION__,
+                          reason: error instanceof Error ? error.message : t("Update-Prüfung fehlgeschlagen."),
+                        })).finally(() => setCheckingUpdate(false));
                       }}
-                    ><RefreshCw size={14} /> {checkingUpdate ? "Prüfe…" : "Nach Updates suchen"}</button>
+                    ><RefreshCw size={14} /> {checkingUpdate ? t("Bitte warten…") : t("Nach Updates suchen")}</button>
                     {updateResult?.available && updateResult.downloadUrl && (
-                      <button className="primary-button" onClick={() => {
+                      <button className="primary-button" disabled={checkingUpdate} onClick={() => {
                         setCheckingUpdate(true);
                         void window.kiwi?.app.installUpdate(updateResult)
+                          .then(() => {
+                            if (manualUpdate) setUpdateResult({
+                              ...updateResult,
+                              reason: t("Update heruntergeladen. Das Paket wurde im Dateimanager angezeigt."),
+                            });
+                          })
                           .catch((error) => setUpdateResult({
                             ...updateResult,
-                            reason: error instanceof Error ? error.message : "Update konnte nicht installiert werden.",
+                            reason: error instanceof Error ? error.message : t("Update konnte nicht installiert werden."),
                           }))
                           .finally(() => setCheckingUpdate(false));
-                      }}>Version {updateResult.version} automatisch installieren</button>
+                      }}>{manualUpdate ? t("Update herunterladen") : t("Update installieren")} ({updateResult.version})</button>
+                    )}
+                    {updateReleaseUrl && (
+                      <button onClick={() => void onOpenUpdate(updateReleaseUrl)}>{t("GitHub Releases öffnen")}</button>
                     )}
                     {updateResult?.reason && updateResult.available && <small>{updateResult.reason}</small>}
                     {updateResult && !updateResult.available && <small>{updateResult.reason || `Kiwi ${updateResult.currentVersion} ist aktuell.`}</small>}
                   </div>
                 </SettingsRow>
-                </>}
                 <ToggleRow title="Lokale Crash-Berichte" description="Speichert Absturzdetails nur nach Zustimmung lokal im Kiwi-Benutzerdatenordner. Es erfolgt kein automatischer Upload." checked={settings.crashReporting} onChange={(crashReporting) => void onGlobalChange({ crashReporting })} />
                 <ToggleRow title="Screenreader-Modus" description="Aktiviert Electrons Barrierefreiheitsbaum dauerhaft und verbessert semantische Statusmeldungen." checked={settings.screenReaderMode} onChange={(screenReaderMode) => void onGlobalChange({ screenReaderMode })} />
                 <ToggleRow title="Deutliche Fokusmarkierungen" description="Hebt den Tastaturfokus in Menüs, Toolfenstern und Formularen stärker hervor." checked={settings.enhancedFocus} onChange={(enhancedFocus) => void onGlobalChange({ enhancedFocus })} />

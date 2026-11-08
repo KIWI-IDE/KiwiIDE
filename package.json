@@ -1,6 +1,6 @@
 {
   "name": "kiwi-ide",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "author": "Kiwi IDE Contributors",
   "description": "A focused desktop IDE for Java, Kotlin, Python, Rust, PHP, Lua, Go and the C family.",
@@ -143,13 +143,17 @@
       "signAndEditExecutable": false
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "assets/icons/kiwi-512.png",
       "category": "Development",
       "executableName": "kiwi-ide"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "assets/icons/kiwi-512.png",
       "category": "public.app-category.developer-tools"
     },

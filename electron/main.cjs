@@ -1164,6 +1164,8 @@ async function createServices() {
   // is also the version the next check compares against — otherwise the same
   // update would be offered again forever.
   const updates = new UpdateService(settings, effectiveVersion(), userData, globalThis.fetch, {
+    githubReleases: app.isPackaged,
+    manifestUpdates: process.platform === "win32",
     portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || "",
     mainHash: MAIN_PROCESS_HASH,
     // The public halves of the release signing keys, shipped with the build.
@@ -2498,14 +2500,6 @@ function registerIpc() {
   });
   ipcMain.handle("app:updateState", () => ({ ...updateRuntimeState }));
   ipcMain.handle("app:checkForUpdates", async () => {
-    if (process.platform !== "win32") {
-      return {
-        configured: false,
-        available: false,
-        currentVersion: effectiveVersion(),
-        reason: "Install updates using the package for your platform.",
-      };
-    }
     publishUpdateState("checking");
     try {
       const result = await updates.check();
@@ -2575,7 +2569,6 @@ function registerIpc() {
     return true;
   });
   ipcMain.handle("app:downloadUpdate", async (_event, update) => {
-    if (process.platform !== "win32") throw new Error("Install updates using the package for your platform.");
     publishUpdateState("downloading", { version: update?.version });
     try {
       const downloaded = await updates.download(update);
@@ -2587,7 +2580,6 @@ function registerIpc() {
     }
   });
   ipcMain.handle("app:installUpdate", (_event, update) => {
-    if (process.platform !== "win32") throw new Error("Install updates using the package for your platform.");
     if (updateInstallPromise) return updateInstallPromise;
     updateInstallPromise = (async () => {
       let portableStage = null;
@@ -2596,6 +2588,14 @@ function registerIpc() {
         publishUpdateState("downloading", { version: update?.version });
         const downloaded = await updates.download(update);
         if (!fs.existsSync(downloaded.path)) throw new Error("Das verifizierte Update-Paket wurde nicht gefunden.");
+
+        if (process.platform !== "win32") {
+          if (downloaded.artifactKind === "appimage") await fsp.chmod(downloaded.path, 0o755);
+          shell.showItemInFolder(downloaded.path);
+          publishUpdateState("ready", { version: downloaded.version, bytes: downloaded.bytes });
+          updateInstallPromise = null;
+          return { ...downloaded, relaunching: false };
+        }
 
         // A release that only changed the renderer is applied to the running
         // application: the session is flushed, the windows reload, and nothing

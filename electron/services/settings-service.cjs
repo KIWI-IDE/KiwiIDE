@@ -348,7 +348,7 @@ function migrateSettings(value) {
     borderStrength: Math.max(0, Math.min(160, Number(allowed.borderStrength ?? defaults.borderStrength) || 0)),
     shadowStrength: Math.max(0, Math.min(200, Number(allowed.shadowStrength ?? defaults.shadowStrength) || 0)),
     uiFont: typeof allowed.uiFont === "string" ? allowed.uiFont.slice(0, 120) : "",
-    updateChannel: ["stable", "beta"].includes(allowed.updateChannel) ? allowed.updateChannel : "stable",
+    updateChannel: ["stable", "beta", "canary"].includes(allowed.updateChannel) ? allowed.updateChannel : "stable",
     locale: LOCALES.includes(allowed.locale) ? allowed.locale : "de",
     editorColorScheme: String(allowed.editorColorScheme || "theme"),
     // Only hex values reach Monaco; anything else is dropped rather than

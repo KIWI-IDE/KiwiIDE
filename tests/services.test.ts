@@ -477,7 +477,7 @@ describe("safe update checks", () => {
       }),
     };
     let requested = "";
-    const service = new UpdateService(settings, "0.3.0", async (url: URL) => {
+    const service = new UpdateService(settings, "0.3.0", "", async (url: URL) => {
       requested = url.toString();
       return {
         ok: true,
@@ -491,14 +491,14 @@ describe("safe update checks", () => {
           releaseNotes: "Neue Java-Funktionen",
         }),
       };
-    });
+    }, { githubReleases: true });
     await expect(service.check()).resolves.toMatchObject({
       configured: true,
       available: true,
       version: "0.4.0",
       sha256: "a".repeat(64),
     });
-    expect(requested).toContain("channel=beta");
+    expect(requested).toBe("https://updates.example.test/kiwi.json?channel=beta");
     expect(compareVersions("0.3.1", "0.3.0")).toBeGreaterThan(0);
     expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBeGreaterThan(0);
     expect(compareVersions("1.0.0-beta.10", "1.0.0-beta.2")).toBeGreaterThan(0);
@@ -536,6 +536,78 @@ describe("safe update checks", () => {
     manifestHash = "0".repeat(64);
     const mismatching = await service.check();
     await expect(service.download(mismatching)).rejects.toThrow(/Prüfsumme/);
+  });
+
+  it.each([
+    ["win32", "x64", "", "setup.exe", "setup"],
+    ["win32", "x64", "Kiwi.exe", "portable.exe", "portable"],
+    ["linux", "x64", "", "x86_64.AppImage", "appimage"],
+    ["linux", "arm64", "", "arm64.AppImage", "appimage"],
+    ["darwin", "x64", "", "x64.dmg", "dmg"],
+    ["darwin", "arm64", "", "arm64.dmg", "dmg"],
+  ])("chooses the verified GitHub package for %s %s (%s)", async (platform, arch, portableExecutableFile, suffix, kind) => {
+    const asset = (version: string) => ({
+      name: `Kiwi-IDE-${version}-${suffix}`,
+      state: "uploaded",
+      digest: `sha256:${"a".repeat(64)}`,
+      size: 100,
+      browser_download_url: "https://untrusted.example.test/update",
+    });
+    const service = new UpdateService({ get: () => ({ updateChannel: "stable" }) }, "1.0.0", "", async (url: URL) => {
+      expect(url.origin + url.pathname).toBe("https://api.github.com/repos/KIWI-IDE/KiwiIDE/releases");
+      return {
+        ok: true,
+        json: async () => [
+          { tag_name: "v2.0.0-beta.1", prerelease: true, assets: [asset("2.0.0-beta.1")] },
+          { tag_name: "v2.0.0", draft: true, assets: [asset("2.0.0")] },
+          { tag_name: "v1.3.0", assets: [{ ...asset("1.3.0"), digest: null }] },
+          { tag_name: "v1.1.0", assets: [asset("1.1.0")] },
+          { tag_name: "v1.2.0", assets: [asset("1.2.0")] },
+        ],
+      };
+    }, { platform, arch, portableExecutableFile, githubReleases: true, manifestUpdates: false });
+    await expect(service.check()).resolves.toMatchObject({
+      available: true,
+      source: "github",
+      version: "1.2.0",
+      artifactKind: kind,
+      downloadUrl: `https://github.com/KIWI-IDE/KiwiIDE/releases/download/v1.2.0/Kiwi-IDE-1.2.0-${suffix}`,
+      sha256: "a".repeat(64),
+    });
+  });
+
+  it("downloads a GitHub prerelease only when the update channel permits it", async () => {
+    const userData = fs.mkdtempSync(path.join(fixtureRoot, "github-update-"));
+    const bytes = Buffer.from("GitHub DMG fixture");
+    const sha256 = (await import("node:crypto")).createHash("sha256").update(bytes).digest("hex");
+    let updateChannel = "stable";
+    let finalUrl = "https://release-assets.githubusercontent.com/asset";
+    const service = new UpdateService({ get: () => ({ updateChannel }) }, "1.0.0", userData,
+      async (url: URL | string) => new URL(String(url)).hostname === "api.github.com" ? ({
+        ok: true,
+        json: async () => [{
+          tag_name: "v1.1.0-beta.1",
+          prerelease: true,
+          assets: [{
+            name: "Kiwi-IDE-1.1.0-beta.1-arm64.dmg",
+            state: "uploaded",
+            digest: `sha256:${sha256}`,
+            size: bytes.length,
+          }],
+        }],
+      }) : ({ ok: true, url: finalUrl, arrayBuffer: async () => bytes }),
+      { platform: "darwin", arch: "arm64", githubReleases: true, manifestUpdates: false });
+    await expect(service.check()).resolves.toMatchObject({ available: false });
+    updateChannel = "beta";
+    const approved = await service.check();
+    expect(approved).toMatchObject({ available: true, version: "1.1.0-beta.1" });
+    await expect(service.download({ ...approved, artifactKind: "setup" })).rejects.toThrow(/verändert/);
+    finalUrl = "https://untrusted.example.test/asset";
+    await expect(service.download(approved)).rejects.toThrow(/außerhalb von GitHub/);
+    finalUrl = "https://release-assets.githubusercontent.com/asset";
+    const downloaded = await service.download(approved);
+    expect(downloaded.path).toMatch(/\.dmg$/);
+    expect(fs.readFileSync(downloaded.path)).toEqual(bytes);
   });
 });
 

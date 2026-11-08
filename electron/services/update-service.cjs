@@ -35,6 +35,9 @@ function loadTrustedKeys(explicit, keyFile = "") {
 
 const MAX_UPDATE_BYTES = 600 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
+const GITHUB_REPOSITORY = "KIWI-IDE/KiwiIDE";
+const GITHUB_RELEASES_URL = `https://github.com/${GITHUB_REPOSITORY}/releases`;
+const GITHUB_DOWNLOAD_HOSTS = new Set(["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
 const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 
 /**
@@ -112,6 +115,10 @@ class UpdateService {
     this.fetchImpl = fetchImpl;
     this.runtime = {
       artifactKind: runtime?.artifactKind === "portable" || runtime?.portableExecutableFile ? "portable" : "setup",
+      platform: runtime.platform || process.platform,
+      arch: runtime.arch || process.arch,
+      githubReleases: runtime.githubReleases === true,
+      manifestUpdates: runtime.manifestUpdates !== false,
       portableExecutableFile: String(runtime?.portableExecutableFile || ""),
       // Fingerprint of this build's main process. A release that only changed
       // the renderer offers a bundle carrying the same value, and that is the
@@ -128,8 +135,11 @@ class UpdateService {
     const settings = this.settings.get();
     // Managed installations can set a machine-level source without rewriting
     // user settings; an explicit setting always wins.
-    const manifestUrl = String(settings.updateManifestUrl || process.env.KIWI_UPDATE_MANIFEST_URL || "").trim();
+    const manifestUrl = this.runtime.manifestUpdates
+      ? String(settings.updateManifestUrl || process.env.KIWI_UPDATE_MANIFEST_URL || "").trim()
+      : "";
     if (!manifestUrl) {
+      if (this.runtime.githubReleases) return this.checkGithub(normalizeChannel(settings.updateChannel));
       return {
         configured: false,
         available: false,
@@ -151,8 +161,6 @@ class UpdateService {
     });
     if (!response.ok) throw new Error(`Update-Prüfung fehlgeschlagen (HTTP ${response.status}).`);
     if (response.url) assertHttpsUrl(response.url, "Die endgültige Update-Manifest-URL");
-    const contentLength = Number(response.headers?.get?.("content-length") || 0);
-    if (contentLength > MAX_MANIFEST_BYTES) throw new Error("Das Update-Manifest ist zu groß.");
     const manifest = await readManifestResponse(response);
     /*
      * Who wrote it, before what it says.
@@ -186,10 +194,35 @@ class UpdateService {
       signatureWarning: trust.warning || "",
       reason: available ? undefined : `Kiwi ${this.currentVersion} ist aktuell.`,
     };
-    if (available) {
-      result.approvalId = crypto.randomUUID();
-      this.approvedUpdate = Object.freeze({ ...result });
-    }
+    return this.approveResult(result);
+  }
+
+  async checkGithub(channel) {
+    const response = await this.fetchImpl(new URL(`https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=20`), {
+      redirect: "error",
+      headers: { Accept: "application/vnd.github+json", "User-Agent": `Kiwi-IDE/${this.currentVersion}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`GitHub-Update-Prüfung fehlgeschlagen (HTTP ${response.status}).`);
+    const releases = await readManifestResponse(response, 2 * 1024 * 1024, "Die GitHub-Release-Liste");
+    if (!Array.isArray(releases)) throw new Error("Die GitHub-Release-Liste ist ungültig.");
+    const update = selectGithubUpdate(releases, channel, this.currentVersion, this.runtime);
+    return this.approveResult({
+      configured: true,
+      available: Boolean(update),
+      currentVersion: this.currentVersion,
+      source: "github",
+      channel,
+      releaseUrl: GITHUB_RELEASES_URL,
+      ...update,
+      reason: update ? undefined : "Auf GitHub ist kein neueres passendes Update verfügbar.",
+    });
+  }
+
+  approveResult(result) {
+    if (!result.available) return result;
+    result.approvalId = crypto.randomUUID();
+    this.approvedUpdate = Object.freeze({ ...result });
     return result;
   }
 
@@ -219,10 +252,15 @@ class UpdateService {
     const response = await this.fetchImpl(downloadUrl, {
       redirect: "follow",
       headers: { Accept: "application/octet-stream", "User-Agent": `Kiwi-IDE/${this.currentVersion}` },
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(approved.source === "github" ? 900_000 : 120_000),
     });
     if (!response.ok) throw new Error(`Update-Download fehlgeschlagen (HTTP ${response.status}).`);
-    if (response.url) assertHttpsUrl(response.url, "Die endgültige Update-Download-URL");
+    if (response.url) {
+      const finalUrl = assertHttpsUrl(response.url, "Die endgültige Update-Download-URL");
+      if (approved.source === "github" && !GITHUB_DOWNLOAD_HOSTS.has(finalUrl.hostname)) {
+        throw new Error("Der Update-Download wurde außerhalb von GitHub umgeleitet.");
+      }
+    }
     const announcedBytes = Number(response.headers?.get?.("content-length") || 0);
     if (announcedBytes && announcedBytes !== approved.bytes) {
       throw new Error("Die angekündigte Download-Größe stimmt nicht mit dem Manifest überein.");
@@ -269,7 +307,7 @@ class UpdateService {
 
   assertApproved(update) {
     if (!this.approvedUpdate) throw new Error("Das Update muss unmittelbar vor dem Download erneut geprüft werden.");
-    const keys = ["approvalId", "version", "downloadUrl", "sha256", "bytes", "channel", "artifactKind"];
+    const keys = ["approvalId", "version", "downloadUrl", "sha256", "bytes", "channel", "artifactKind", "mainHash", "source"];
     if (!update || keys.some((key) => update[key] !== this.approvedUpdate[key])) {
       throw new Error("Die Update-Daten wurden verändert oder sind nicht mehr gültig.");
     }
@@ -277,14 +315,15 @@ class UpdateService {
   }
 }
 
-async function readManifestResponse(response) {
+async function readManifestResponse(response, maxBytes = MAX_MANIFEST_BYTES, label = "Das Update-Manifest") {
+  if (Number(response.headers?.get?.("content-length") || 0) > maxBytes) throw new Error(`${label} ist zu groß.`);
   if (typeof response.text === "function") {
     const text = await response.text();
-    if (Buffer.byteLength(text, "utf8") > MAX_MANIFEST_BYTES) throw new Error("Das Update-Manifest ist zu groß.");
+    if (Buffer.byteLength(text, "utf8") > maxBytes) throw new Error(`${label} ist zu groß.`);
     try {
       return JSON.parse(text);
     } catch {
-      throw new Error("Das Update-Manifest enthält kein gültiges JSON.");
+      throw new Error(`${label} enthält kein gültiges JSON.`);
     }
   }
   return response.json();
@@ -292,7 +331,55 @@ async function readManifestResponse(response) {
 
 /** File extension of each update package, by kind. */
 function artifactExtension(artifactKind) {
-  return artifactKind === "renderer" ? ".kiwi" : ".exe";
+  return { renderer: ".kiwi", dmg: ".dmg", appimage: ".AppImage" }[artifactKind] || ".exe";
+}
+
+function githubPackage(version, { platform, arch, artifactKind }) {
+  const prefix = `Kiwi-IDE-${version}`;
+  if (platform === "win32" && arch === "x64") {
+    return { artifactKind, names: [`${prefix}-${artifactKind}.exe`] };
+  }
+  if (platform === "darwin" && ["x64", "arm64"].includes(arch)) {
+    return { artifactKind: "dmg", names: [`${prefix}-${arch}.dmg`] };
+  }
+  if (platform === "linux" && ["x64", "arm64"].includes(arch)) {
+    return {
+      artifactKind: "appimage",
+      names: arch === "x64" ? [`${prefix}-x86_64.AppImage`, `${prefix}-x64.AppImage`] : [`${prefix}-arm64.AppImage`],
+    };
+  }
+  return null;
+}
+
+function selectGithubUpdate(releases, channel, currentVersion, runtime) {
+  let update;
+  for (const release of releases) {
+    if (release?.draft || typeof release?.tag_name !== "string" || !Array.isArray(release.assets)) continue;
+    const tag = release.tag_name;
+    const version = tag.replace(/^v/i, "");
+    const match = version.match(SEMVER_PATTERN);
+    if (!match || (channel === "stable" && (release.prerelease || match[4]))) continue;
+    if (compareVersions(version, update?.version || currentVersion) <= 0) continue;
+    const variant = githubPackage(version, runtime);
+    const asset = variant && release.assets.find((entry) => entry?.state === "uploaded"
+      && variant.names.includes(entry.name)
+      && /^sha256:[a-f0-9]{64}$/i.test(entry.digest || "")
+      && Number.isSafeInteger(entry.size) && entry.size > 0 && entry.size <= MAX_UPDATE_BYTES);
+    if (!asset) continue;
+    const releaseUrl = `${GITHUB_RELEASES_URL}/tag/${encodeURIComponent(tag)}`;
+    update = {
+      version,
+      releaseUrl,
+      downloadUrl: `${GITHUB_RELEASES_URL}/download/${encodeURIComponent(tag)}/${encodeURIComponent(asset.name)}`,
+      sha256: asset.digest.slice(7).toLowerCase(),
+      bytes: asset.size,
+      artifactKind: variant.artifactKind,
+      filename: asset.name,
+      releaseNotes: String(release.body || "").slice(0, 20_000),
+      publishedAt: String(release.published_at || ""),
+    };
+  }
+  return update;
 }
 
 /**

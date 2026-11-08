@@ -2500,11 +2500,11 @@ function IdeApp() {
   useEffect(() => {
     // Wait for the launch state before checking. A fallback relaunch after a
     // failed installer must not immediately retry the same update in a loop.
-    if (window.kiwi?.platform !== "win32" || !bootstrapped || !updateRuntime || !settings.automaticUpdates || automaticUpdateChecked.current) return;
+    if (!bootstrapped || !updateRuntime || !settings.automaticUpdates || automaticUpdateChecked.current) return;
     if (updateRuntime.status === "error" && updateRuntime.operation === "install") return;
     automaticUpdateChecked.current = true;
     void checkForUpdates(true).then((result) => {
-      if (!result.available || !result.downloadUrl || !result.sha256) return;
+      if (!result.available || !result.downloadUrl || !result.sha256 || result.source === "github") return;
       toast(`Kiwi ${result.version} wird im Hintergrund aktualisiert.`, "info");
       return window.kiwi?.app.installUpdate(result).then((installed) => {
         // A renderer update is applied to the running Kiwi; only a release that
