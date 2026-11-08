@@ -1,0 +1,20 @@
+node_modules/
+dist/
+release/
+resources/update-server/build/
+resources/update-server/kiwi-update-server.jar
+.kiwi/
+resources/toolchain/jdtls/
+resources/toolchain/maven/
+resources/toolchain/gradle/
+resources/toolchain/.downloads/
+resources/debug-adapter/.classes/
+resources/debug-adapter/*.jar
+resources/codetogether-relay/build/
+resources/codetogether-relay/*.jar
+*.log
+.DS_Store
+Thumbs.db
+
+# Local signing password
+/pw.txt

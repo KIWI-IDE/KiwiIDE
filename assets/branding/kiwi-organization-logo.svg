@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">KIWI organization logo</title>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#1A352F"/>
+      <stop offset="1" stop-color="#0A1919"/>
+    </linearGradient>
+    <linearGradient id="feathers" x2="0.86" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#D2FA83"/>
+      <stop offset="1" stop-color="#83D74B"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#background)"/>
+  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="#D2FA83" stroke-opacity=".16" stroke-width="2"/>
+  <g transform="translate(0 2)">
+    <path d="M201 288l-12 33h-23m78-30 7 30h26" fill="none" stroke="#83D74B" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M106 237c0-59 49-107 115-112 18-1 33 2 46 7 13-18 32-29 55-28 35 1 60 25 65 56 22 16 32 41 31 68-16-22-34-38-55-44-13 5-24 20-31 36-20 48-60 77-113 82-62 6-113-21-113-65Z" fill="url(#feathers)"/>
+    <path d="M130 242c29 13 79 8 112-21 3 31-30 59-69 56-22-2-37-14-43-35Z" fill="#255C31" fill-opacity=".48"/>
+    <circle cx="337" cy="145" r="13" fill="#122820"/>
+    <circle cx="341" cy="141" r="3.5" fill="#F4FFE9"/>
+  </g>
+  <g fill="#F4FFE9" aria-label="KIWI">
+    <path d="M142 368h14v27l27-27h19l-30 29 32 33h-20l-28-30v30h-14z"/>
+    <path d="M218 368h14v62h-14z"/>
+    <path d="M246 368h15l11 43 14-43h13l14 43 11-43h15l-18 62h-15l-14-41-14 41h-15z"/>
+    <path d="M356 368h14v62h-14z"/>
+  </g>
+</svg>

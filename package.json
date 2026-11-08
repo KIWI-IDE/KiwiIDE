@@ -1,0 +1,183 @@
+{
+  "name": "kiwi-ide",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Kiwi IDE Contributors",
+  "description": "A focused desktop IDE for Java, Kotlin, Python, Rust, PHP, Lua, Go and the C family.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "build": "npm run build:compile && npm run test:hot-update && npm run test:layout && npm run test:preload && npm run test:e2e:repeat",
+    "build:compile": "npm run icons && npm run debug-adapter && tsc --noEmit && vite build",
+    "icons": "node scripts/build-icons.mjs && node scripts/build-installer-art.mjs",
+    "debug-adapter": "node scripts/build-debug-adapter.mjs",
+    "fetch:toolchain": "node scripts/fetch-toolchain.mjs",
+    "preview": "vite preview",
+    "test": "npm run icons && vitest run",
+    "test:jdtls": "node scripts/smoke-jdtls.mjs",
+    "test:debug": "npm run debug-adapter && node scripts/smoke-debug.mjs",
+    "test:debug:projects": "npm run debug-adapter && node scripts/smoke-debug-projects.mjs",
+    "test:projects": "node scripts/smoke-projects.mjs",
+    "test:e2e": "node scripts/smoke-electron.mjs",
+    "test:polyglot:editor": "node scripts/smoke-polyglot-editor.mjs",
+    "test:polyglot:lsp": "node scripts/smoke-polyglot-lsp.mjs",
+    "test:polyglot:projects": "node scripts/smoke-polyglot-projects.mjs",
+    "test:hot-update": "node scripts/smoke-hot-update.mjs",
+    "test:layout": "node scripts/smoke-layout-persistence.mjs",
+    "test:preload": "node scripts/smoke-startup-preload.mjs",
+    "test:e2e:repeat": "node scripts/repeat-e2e.mjs",
+    "test:e2e:packaged": "node scripts/smoke-electron.mjs --packaged",
+    "test:e2e:portable": "node scripts/smoke-electron.mjs --portable",
+    "test:e2e:real": "node scripts/audit-real-workspace.mjs",
+    "test:performance": "node scripts/benchmark-large-project.mjs",
+    "dist:win": "npm run fetch:toolchain && npm run build && npm run dist:win:package",
+    "dist:portable": "npm run fetch:toolchain && npm run build && electron-builder --win portable",
+    "dist:linux": "npm run fetch:toolchain && npm run build:compile && electron-builder --linux --publish never",
+    "dist:mac": "npm run fetch:toolchain && npm run build:compile && electron-builder --mac --publish never",
+    "release:manifest": "node scripts/create-update-manifest.mjs",
+    "release:renderer": "node scripts/build-renderer-bundle.mjs",
+    "release:publish": "node scripts/publish-update.mjs",
+    "release:sign": "node scripts/sign-windows-artifacts.cjs",
+    "update:server:build": "node scripts/build-update-server.mjs",
+    "update:server:package": "node scripts/package-update-server.mjs",
+    "update:server": "npm run update:server:build && java -jar resources/update-server/kiwi-update-server.jar",
+    "test:update": "npm run update:server:build && vitest run tests/update-server.test.ts tests/services.test.ts -t \"Java HTTPS update server|safe update checks\"",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "relay:build": "node scripts/build-codetogether-relay.mjs",
+    "relay:package": "node scripts/package-codetogether-relay.mjs",
+    "relay": "npm run relay:build && java -jar resources/codetogether-relay/kiwi-codetogether-relay.jar",
+    "relay:node": "node scripts/kiwi-relay.mjs",
+    "test:relay": "npm run relay:build && vitest run tests/java-codetogether-relay.test.ts tests/collab-relay-service.test.ts",
+    "test:gaps": "node scripts/find-test-gaps.mjs",
+    "dist:win:finish": "npm run release:sign && npm run release:renderer && npm run release:manifest",
+    "dist:win:package": "electron-builder --win portable nsis && npm run dist:win:finish",
+    "installer:art": "node scripts/build-installer-art.mjs"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "extract-zip": "^2.0.1",
+    "fast-xml-parser": "^5.2.5",
+    "lucide-react": "^0.468.0",
+    "monaco-editor": "^0.52.2",
+    "node-pty": "^1.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tar": "^7.4.3",
+    "vscode-jsonrpc": "^8.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.1",
+    "rcedit": "^4.0.1",
+    "sharp": "^0.34.3",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "dev.kiwi.ide",
+    "productName": "Kiwi IDE",
+    "artifactName": "Kiwi-IDE-${version}-${arch}.${ext}",
+    "afterPack": "scripts/after-pack.cjs",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "resources/toolchain",
+        "to": "toolchain",
+        "filter": [
+          "**/*",
+          "!.downloads{,/**/*}"
+        ]
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "resources/debug-adapter/kiwi-debug-adapter.jar",
+        "to": "debug-adapter/kiwi-debug-adapter.jar"
+      },
+      {
+        "from": "resources/update-keys.pem",
+        "to": "update-keys.pem",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/update-helper/portable-update.ps1",
+        "to": "update-helper/portable-update.ps1"
+      },
+      {
+        "from": "resources/update-helper/setup-update.ps1",
+        "to": "update-helper/setup-update.ps1"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "assets/icons/kiwi.ico",
+      "signAndEditExecutable": false
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "assets/icons/kiwi-512.png",
+      "category": "Development",
+      "executableName": "kiwi-ide"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "assets/icons/kiwi-512.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "portable": {
+      "artifactName": "Kiwi-IDE-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "installerIcon": "assets/icons/kiwi.ico",
+      "uninstallerIcon": "assets/icons/kiwi.ico",
+      "installerHeaderIcon": "assets/icons/kiwi.ico",
+      "installerHeader": "assets/installer/header.bmp",
+      "installerSidebar": "assets/installer/sidebar.bmp",
+      "uninstallerSidebar": "assets/installer/uninstaller-sidebar.bmp",
+      "artifactName": "Kiwi-IDE-${version}-setup.${ext}",
+      "differentialPackage": false,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Kiwi IDE",
+      "menuCategory": false,
+      "uninstallDisplayName": "Kiwi IDE ${version}",
+      "runAfterFinish": true,
+      "multiLanguageInstaller": true,
+      "installerLanguages": [
+        "de_DE",
+        "en_US"
+      ]
+    }
+  }
+}

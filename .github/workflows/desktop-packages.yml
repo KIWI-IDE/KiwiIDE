@@ -1,0 +1,54 @@
+name: Desktop packages
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux, arch: x64, runner: ubuntu-24.04 }
+          - { platform: linux, arch: arm64, runner: ubuntu-24.04-arm }
+          - { platform: mac, arch: x64, runner: macos-15-intel }
+          - { platform: mac, arch: arm64, runner: macos-15 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - run: npm ci
+      - run: npm run dist:${{ matrix.platform }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify packaged app, terminal and Java language server
+        shell: bash
+        run: |
+          KIWI_SMOKE_EXECUTABLE="$(find "$PWD/release" -type f \( -path '*/Contents/MacOS/Kiwi IDE' -o -path '*/linux*-unpacked/kiwi-ide' \) -print)"
+          export KIWI_SMOKE_EXECUTABLE
+          test -x "$KIWI_SMOKE_EXECUTABLE"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run --auto-servernum node scripts/smoke-layout-persistence.mjs --startup-only
+          else
+            node scripts/smoke-layout-persistence.mjs --startup-only
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiwi-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.AppImage
+            release/*.dmg
+          if-no-files-found: error

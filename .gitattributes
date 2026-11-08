@@ -1,0 +1,26 @@
+# How line endings are decided, so that it is not decided per machine.
+#
+# Without this file the answer comes from each developer's core.autocrlf. Here
+# it was true, which checks files out with CRLF while the repository stores LF —
+# and every tool that writes a file with LF then leaves it half one and half the
+# other. Anchors stop matching, diffs fill with lines nobody touched, and a
+# scripted edit fails for a reason that has nothing to do with what it changed.
+#
+# The repository already stores LF for all 205 text files, so this settles the
+# working copy rather than rewriting history: text is checked out as LF too.
+* text=auto eol=lf
+
+# Except the two kinds Windows itself reads. A batch file with LF endings can
+# parse differently, and there is nothing to gain by finding out where.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary, so git never looks for line endings in them. The PNGs already contain
+# byte pairs that look like CRLF, which is exactly the mistake to prevent.
+*.png binary
+*.ico binary
+*.jar binary
+*.exe binary
+*.pfx binary
+*.kiwi binary

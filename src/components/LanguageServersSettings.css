@@ -1,0 +1,13 @@
+.language-server-settings > p { color: var(--muted); line-height: 1.6; max-width: 760px; }
+.language-server-settings button { display: inline-flex; align-items: center; gap: 7px; }
+.language-server-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 14px 0; display: grid; gap: 12px; }
+.language-server-card header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.language-server-card header span, .language-server-card small { color: var(--muted); font-size: 12px; }
+.language-server-card .available { color: var(--accent); }
+.language-server-card .missing { color: var(--amber); }
+.language-server-card > label { display: grid; gap: 6px; font-size: 12px; }
+.language-server-card .language-server-enabled { display: flex; align-items: center; gap: 8px; }
+.language-server-card input:not([type="checkbox"]), .language-server-card textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--input-background, var(--background)); color: inherit; font: inherit; }
+.language-server-card textarea { resize: vertical; font-family: Consolas, monospace; }
+.language-server-card code { display: block; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }
+.language-server-card footer { display: flex; flex-wrap: wrap; gap: 8px; }
