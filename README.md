@@ -1,10 +1,5 @@
 ![Kiwi IDE banner with the original logo and a Java code example](https://i.ibb.co/FLPHspr8/image.png)
 
-# KIWI
-
-**KIWI is the organization behind Kiwi IDE, a multi-language desktop development environment with a focus on Java.**
-
-[Explore Kiwi IDE][kiwi-ide] · [Features](#features) · [Platforms](#platforms) · [Build from source](#build-from-source) · [Contributing](#contributing)
 
 ## Kiwi IDE
 
@@ -62,4 +57,4 @@ npm run dist:mac
 
 Open an issue in the [Kiwi IDE repository][kiwi-ide] to report a bug or suggest a feature. For bug reports, include your Kiwi IDE version, operating system, and the steps to reproduce the issue. If it affects a build or language feature, include the relevant tool versions and error output.
 
-[kiwi-ide]: https://github.com/YOUR-ORG/KiwiIDE
+[kiwi-ide]: https://github.com/KIWI-IDE/KiwiIDE
