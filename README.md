@@ -1,46 +1,49 @@
 ![Kiwi IDE banner with the original logo and a Java code example](https://i.ibb.co/FLPHspr8/image.png)
 
+# Kiwi IDE
 
-## Kiwi IDE
+Kiwi IDE is a multi-language desktop development environment for Windows, Linux, and macOS with a focus on Java. Write code, run tests, debug applications, and manage Git changes from the same workspace.
 
-Create a project, write code, run tests, debug your application, and commit changes from one workspace. Kiwi IDE brings these tools together with a project switcher that keeps each project's editor tabs, terminal sessions, and run configurations separate.
+[Releases](https://github.com/KIWI-IDE/KiwiIDE/releases) · [Build from source](#build-from-source) · [Discord](https://discord.gg/E8Xc4BcSBU) · [Issues](https://github.com/KIWI-IDE/KiwiIDE/issues)
 
 ## Features
 
 | Area | What you can do |
 | --- | --- |
-| **Java editing** | Use code completion, navigate to definitions and references, organize imports, rename symbols, and apply quick fixes. |
-| **Project setup** | Start with a plain Java, Maven, or Gradle project. Manage dependencies and run build tasks from the IDE. |
-| **Debugging and testing** | Set breakpoints, inspect variables, run JUnit tests, and view test coverage in the editor. |
+| **Java editing** | Get code suggestions, jump to definitions and references, organize imports, rename symbols, and apply quick fixes. |
+| **Project setup** | Create plain Java, Maven, or Gradle projects. Manage dependencies and run build tasks from the IDE. |
+| **Debugging and testing** | Set breakpoints, inspect variables, run JUnit tests, and view coverage in the editor. |
 | **Git** | Review diffs, stage changes, commit, switch branches, and resolve merge conflicts. |
-| **Terminal** | Run commands in PowerShell on Windows or in your own shell on Linux and macOS. |
-| **Workspace** | Dock tool windows where you want them or move them to a separate window. |
+| **Terminal** | Use PowerShell on Windows or your own shell on Linux and macOS. |
+| **Workspace** | Switch between projects while keeping their tabs, terminals, and run configurations separate. Dock tool windows or open them in a separate window. |
 
 ## Languages
 
-Java has dedicated support for editing, builds, debugging, and testing. Kiwi IDE also supports Kotlin, Python, Rust, PHP, Lua, Go, C, C++, C#, Objective-C, and Objective-C++, as well as web development with HTML, CSS, JavaScript, and TypeScript. Build tools and language servers depend on the language you use.
+Java has dedicated support for editing, builds, debugging, and testing. Kiwi IDE also supports Kotlin, Python, Rust, PHP, Lua, Go, C, C++, C#, Objective-C, and Objective-C++, plus HTML, CSS, JavaScript, and TypeScript for web development. Some languages require separate compilers, runtimes, or language servers.
 
 ## Platforms
 
-| Platform | Package |
+| Platform | Package format |
 | --- | --- |
 | **Windows** | x64 installer and portable executable |
 | **Linux** | AppImage build targets for x64 and ARM64 |
 | **macOS** | DMG build targets for Intel and Apple Silicon |
 
-Visit the **Releases** section of the [Kiwi IDE repository][kiwi-ide] to see which packages are available. For Java development, use JDK 21 or later to run the Java language server.
+Check which packages are available on the [Releases page](https://github.com/KIWI-IDE/KiwiIDE/releases).
 
 ## Build from source
 
-Clone the [Kiwi IDE repository][kiwi-ide]. With Node.js 20 or later and JDK 21 or later installed, run the following commands from the project directory.
+Install Node.js 20 or later and JDK 21 or later. Then clone the repository and start Kiwi IDE.
 
 ```sh
+git clone https://github.com/KIWI-IDE/KiwiIDE.git
+cd KiwiIDE
 npm ci
 npm run fetch:toolchain
 npm run dev
 ```
 
-To build a desktop package, run the command for your operating system.
+Run the packaging command for your operating system.
 
 ```sh
 # Windows
@@ -53,8 +56,8 @@ npm run dist:linux
 npm run dist:mac
 ```
 
-## Contributing
+## Community and contributions
 
-Open an issue in the [Kiwi IDE repository][kiwi-ide] to report a bug or suggest a feature. For bug reports, include your Kiwi IDE version, operating system, and the steps to reproduce the issue. If it affects a build or language feature, include the relevant tool versions and error output.
+Have a question about Kiwi IDE, want to share feedback, or have a feature idea? [Join the Kiwi IDE Discord](https://discord.gg/E8Xc4BcSBU).
 
-[kiwi-ide]: https://github.com/KIWI-IDE/KiwiIDE
+If you find a bug, include your Kiwi IDE version, operating system, and steps to reproduce it. For build or language issues, include the relevant tool versions and error output. [Open a GitHub issue](https://github.com/KIWI-IDE/KiwiIDE/issues).
