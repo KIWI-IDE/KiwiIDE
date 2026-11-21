@@ -21,6 +21,7 @@ const INITIAL_DIAGNOSTIC_SETTLE_MS = 800;
 const JDT_INITIALIZE_TIMEOUT_MS = 60_000;
 const JDT_SERVICE_READY_TIMEOUT_MS = 45_000;
 const JDT_CLASSPATH_REQUEST_TIMEOUT_MS = 10_000;
+const JDT_INITIAL_CLASSPATH_TIMEOUT_MS = 60_000;
 const JDT_DECORATION_REQUEST_TIMEOUT_MS = 15_000;
 const JDT_INTERACTIVE_REQUEST_TIMEOUT_MS = 30_000;
 const JDT_PROJECT_REQUEST_TIMEOUT_MS = 90_000;
@@ -525,7 +526,7 @@ class LanguageSession {
     const expectsDependencies = await projectDeclaresDependencies(root, projectModel);
     // A failed classpath probe is survivable, a dead server is not: re-check
     // afterwards so a crash here is never reported as a ready language service.
-    this.classpath = await this.waitForClasspath(expectsDependencies).catch((error) => {
+    this.classpath = await this.waitForClasspath(expectsDependencies, JDT_INITIAL_CLASSPATH_TIMEOUT_MS).catch((error) => {
       this.send("language:log", { text: `Classpath-Analyse: ${error.message}\n` });
       if (isJdtTimeout(error)) throw error;
       return null;
@@ -574,7 +575,7 @@ class LanguageSession {
     };
   }
 
-  async inspectClasspath(anchorFile = "") {
+  async inspectClasspath(anchorFile = "", timeout = JDT_CLASSPATH_REQUEST_TIMEOUT_MS) {
     if (!this.connection || !this.root) return null;
     const anchor = anchorFile || this.projectModel?.javaFiles?.[0] || this.root;
     return rejectAfterTimeout(this.connection.sendRequest("workspace/executeCommand", {
@@ -582,14 +583,14 @@ class LanguageSession {
       // JDT LS 1.60 still expects this custom-command model as a serialized
       // JSON argument. Passing a plain object is converted to null internally.
       arguments: [pathToFileURL(anchor).toString(), JSON.stringify({ scope: "runtime" })],
-    }), JDT_CLASSPATH_REQUEST_TIMEOUT_MS, "JDT-LS Classpath-Abfrage");
+    }), timeout, "JDT-LS Classpath-Abfrage");
   }
 
-  async waitForClasspath(expectsDependencies = false) {
+  async waitForClasspath(expectsDependencies = false, requestTimeout = JDT_CLASSPATH_REQUEST_TIMEOUT_MS) {
     const timeoutAt = Date.now() + (expectsDependencies ? 2_500 : 1_000);
     let classpath = null;
     do {
-      classpath = await this.inspectClasspath();
+      classpath = await this.inspectClasspath("", requestTimeout);
       if (!expectsDependencies || countClasspathEntries(classpath) > 0) return classpath;
       this.send("language:status", {
         status: "indexing",
