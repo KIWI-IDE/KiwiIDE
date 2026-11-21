@@ -149,8 +149,10 @@ export function DependencyDialog({
 
   useEffect(() => {
     const text = intent.search;
+    requestedQueryRef.current = text;
     if (!text) {
       setResults([]);
+      setSearching(false);
       return;
     }
     // Answers arrive in whatever order the network decides, so one that has
@@ -160,7 +162,6 @@ export function DependencyDialog({
     // again for reasons that have nothing to do with the search. Tying it to
     // the effect threw away the answer to the very query that was still in the
     // box — and the search only worked when it was typed a second time.
-    requestedQueryRef.current = text;
     const handle = window.setTimeout(async () => {
       setSearching(true);
       setError("");
@@ -191,13 +192,17 @@ export function DependencyDialog({
       // and they come back in whatever order the network decides. Only the
       // answer for the entry that is still chosen may be shown — otherwise the
       // version list belongs to a library that is no longer selected.
-      if (published.length && requestedRef.current === coordinate) setVersions(published);
+      if (published.length && requestedRef.current === coordinate) {
+        setVersions([...new Set([candidate.version, ...published])]);
+      }
     } catch {
       // The latest version from the search result is enough to continue with.
     }
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.target instanceof HTMLSelectElement) return;
+    if (event.target instanceof HTMLInputElement && !event.target.closest(".dependency-search")) return;
     // A button under the finger keeps its own Enter. Taking it here would make
     // the close button add a dependency.
     if (event.key === "Enter" && event.target instanceof HTMLButtonElement) return;
@@ -272,6 +277,8 @@ export function DependencyDialog({
             autoFocus
             value={query}
             onChange={(event) => {
+              requestedRef.current = "";
+              requestedQueryRef.current = dependencyQueryIntent(event.target.value).search;
               setQuery(event.target.value);
               setSelected(null);
               setCursor(-1);
@@ -359,7 +366,7 @@ export function DependencyDialog({
 
         <footer>
           {selected && (
-            <select value={version} onChange={(event) => setVersion(event.target.value)} aria-label={t("Version")}>
+            <select value={version} onChange={(event) => setVersion(event.target.value)} aria-label={t("Version")} title={version}>
               {versions.map((entry) => <option key={entry} value={entry}>{entry}</option>)}
             </select>
           )}

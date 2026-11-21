@@ -1,6 +1,6 @@
 {
   "name": "kiwi-ide",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "author": "Kiwi IDE Contributors",
   "description": "A focused desktop IDE for Java, Kotlin, Python, Rust, PHP, Lua, Go and the C family.",
@@ -24,6 +24,7 @@
     "test:polyglot:projects": "node scripts/smoke-polyglot-projects.mjs",
     "test:hot-update": "node scripts/smoke-hot-update.mjs",
     "test:layout": "node scripts/smoke-layout-persistence.mjs",
+    "test:dependency-dialog": "node scripts/smoke-dependency-dialog.mjs",
     "test:preload": "node scripts/smoke-startup-preload.mjs",
     "test:e2e:repeat": "node scripts/repeat-e2e.mjs",
     "test:e2e:packaged": "node scripts/smoke-electron.mjs --packaged",

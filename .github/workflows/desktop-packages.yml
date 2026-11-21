@@ -42,8 +42,10 @@ jobs:
           test -x "$KIWI_SMOKE_EXECUTABLE"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             xvfb-run --auto-servernum node scripts/smoke-layout-persistence.mjs --startup-only
+            xvfb-run --auto-servernum node scripts/smoke-dependency-dialog.mjs
           else
             node scripts/smoke-layout-persistence.mjs --startup-only
+            node scripts/smoke-dependency-dialog.mjs
           fi
       - uses: actions/upload-artifact@v4
         with:
