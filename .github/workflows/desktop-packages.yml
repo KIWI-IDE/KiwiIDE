@@ -31,6 +31,7 @@ jobs:
           distribution: temurin
           java-version: '25'
       - run: npm ci
+      - run: node node_modules/vitest/vitest.mjs run tests/unix-update.test.ts
       - run: npm run dist:${{ matrix.platform }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -46,6 +47,7 @@ jobs:
           else
             node scripts/smoke-layout-persistence.mjs --startup-only
             node scripts/smoke-dependency-dialog.mjs
+            KIWI_UPDATE_TEST_DMG="$(find "$PWD/release" -maxdepth 1 -name '*.dmg' -print)" node node_modules/vitest/vitest.mjs run tests/unix-update.test.ts
           fi
       - uses: actions/upload-artifact@v4
         with:

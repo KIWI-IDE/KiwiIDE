@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, safeStorage, session, shell } = require("electron");
 const fs = require("node:fs");
+const { prepareUnixUpdate, discardUnixUpdate } = require("./services/unix-update-service.cjs");
 const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
 const path = require("node:path");
@@ -1165,7 +1166,7 @@ async function createServices() {
   // update would be offered again forever.
   const updates = new UpdateService(settings, effectiveVersion(), userData, globalThis.fetch, {
     githubReleases: app.isPackaged,
-    manifestUpdates: process.platform === "win32",
+    manifestUpdates: false,
     portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || "",
     mainHash: MAIN_PROCESS_HASH,
     // The public halves of the release signing keys, shipped with the build.
@@ -2583,6 +2584,7 @@ function registerIpc() {
     if (updateInstallPromise) return updateInstallPromise;
     updateInstallPromise = (async () => {
       let portableStage = null;
+      let unixStage = null;
       try {
         if (shutdownStarted) throw new Error("Kiwi wird bereits beendet; das Update wurde nicht gestartet.");
         publishUpdateState("downloading", { version: update?.version });
@@ -2590,11 +2592,14 @@ function registerIpc() {
         if (!fs.existsSync(downloaded.path)) throw new Error("Das verifizierte Update-Paket wurde nicht gefunden.");
 
         if (process.platform !== "win32") {
-          if (downloaded.artifactKind === "appimage") await fsp.chmod(downloaded.path, 0o755);
-          shell.showItemInFolder(downloaded.path);
-          publishUpdateState("ready", { version: downloaded.version, bytes: downloaded.bytes });
-          updateInstallPromise = null;
-          return { ...downloaded, relaunching: false };
+          publishUpdateState("preparing", { version: downloaded.version });
+          unixStage = await prepareUnixUpdate(downloaded, { userData: app.getPath("userData") });
+          await prepareRenderersForUpdate(downloaded.version);
+          if (shutdownStarted) throw new Error("Kiwi wird bereits beendet; das Update wurde nicht gestartet.");
+          pendingUpdateLaunch = { ...unixStage, version: downloaded.version };
+          publishUpdateState("restarting", { version: downloaded.version });
+          setTimeout(() => app.quit(), 125);
+          return { ...downloaded, relaunching: true };
         }
 
         // A release that only changed the renderer is applied to the running
@@ -2667,6 +2672,7 @@ function registerIpc() {
         return { ...downloaded, relaunching: true };
       } catch (error) {
         await discardPortableStage(portableStage);
+        await discardUnixUpdate(unixStage).catch(() => undefined);
         pendingUpdateLaunch = null;
         updateInstallPromise = null;
         publishUpdateState("error", {

@@ -2504,7 +2504,7 @@ function IdeApp() {
     if (updateRuntime.status === "error" && updateRuntime.operation === "install") return;
     automaticUpdateChecked.current = true;
     void checkForUpdates(true).then((result) => {
-      if (!result.available || !result.downloadUrl || !result.sha256 || result.source === "github") return;
+      if (!result.available || !result.downloadUrl || !result.sha256) return;
       toast(`Kiwi ${result.version} wird im Hintergrund aktualisiert.`, "info");
       return window.kiwi?.app.installUpdate(result).then((installed) => {
         // A renderer update is applied to the running Kiwi; only a release that

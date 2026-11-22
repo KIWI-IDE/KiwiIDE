@@ -215,13 +215,18 @@ Python 3, Make und einen C++-Compiler, macOS die Xcode Command Line Tools.
 
 ## Updates über GitHub Releases
 
-Gepackte Kiwi-Versionen prüfen standardmäßig die [GitHub Releases von Kiwi IDE](https://github.com/KIWI-IDE/KiwiIDE/releases).
+Gepackte Kiwi-Versionen beziehen Updates fest aus den [GitHub Releases von Kiwi IDE](https://github.com/KIWI-IDE/KiwiIDE/releases).
 Unter **Einstellungen → Allgemein → Jetzt prüfen** lässt sich die Suche jederzeit
 starten. Stable berücksichtigt reguläre Releases, Beta und Canary auch Vorabversionen.
 Kiwi prüft die Dateigröße und den von GitHub gelieferten SHA-256-Wert vor der
-Installation. Unter Windows startet Kiwi nach deiner Bestätigung das Setup oder
-aktualisiert die portable EXE. Unter Linux und macOS zeigt Kiwi das heruntergeladene
-AppImage oder DMG im Dateimanager an.
+Installation. Automatische Updates sind standardmäßig aktiviert. Kiwi lädt ein
+neueres Paket im Hintergrund, sichert den Workspace und startet nach der
+Installation neu. Der Schalter **Automatische Updates** deaktiviert diesen Ablauf.
+Unter Windows verwendet Kiwi das Setup oder aktualisiert die portable EXE.
+Unter Linux wird das laufende AppImage ersetzt, unter macOS die installierte App.
+Die Installation muss im jeweiligen Benutzerkonto beschreibbar sein.
+Unter Linux und macOS bleibt die bisherige Installation im benachbarten
+`.kiwi-update-*`-Ordner als Sicherung erhalten.
 
 Für ein Update veröffentliche einen Release mit einem Versions-Tag wie `v1.0.1`
 und hänge die unveränderten Build-Dateien direkt an den Release. Die Version im
@@ -231,7 +236,7 @@ Dateinamen muss zum Tag passen. Für `v1.0.1` sind das diese Dateien.
 - Linux: `Kiwi-IDE-1.0.1-x86_64.AppImage` und `Kiwi-IDE-1.0.1-arm64.AppImage`
 - macOS: `Kiwi-IDE-1.0.1-x64.dmg` und `Kiwi-IDE-1.0.1-arm64.dmg`
 
-Eine eigene HTTPS-Manifest-Adresse hat unter Windows Vorrang.
+Früher gespeicherte Manifest-Adressen werden für Desktop-Updates ignoriert.
 
 ## Windows-Pakete
 

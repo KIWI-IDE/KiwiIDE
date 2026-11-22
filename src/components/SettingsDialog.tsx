@@ -97,7 +97,6 @@ export function SettingsDialog({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const updateReleaseUrl = updateResult?.releaseUrl;
-  const manualUpdate = updateResult?.artifactKind === "appimage" || updateResult?.artifactKind === "dmg";
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState("");
   /** Why an imported file was not a theme. Cleared as soon as one is. */
@@ -1846,7 +1845,7 @@ export function SettingsDialog({
                     ><Copy size={13} /> {versionCopied ? t("Kopiert") : t("Versionsangaben kopieren")}</button>
                   </div>
                 </SettingsRow>
-                <ToggleRow title="Updates beim Start prüfen" description="Meldet neue GitHub-Releases beim Start. Ein eigenes Windows-Update-Manifest kann Updates automatisch installieren." checked={settings.automaticUpdates} onChange={(automaticUpdates) => void onGlobalChange({ automaticUpdates })} />
+                <ToggleRow title="Automatische Updates" description="Kiwi lädt neue Versionen aus GitHub Releases, prüft den Download und startet nach der Installation mit deinem Workspace neu." checked={settings.automaticUpdates} onChange={(automaticUpdates) => void onGlobalChange({ automaticUpdates })} />
                 <SettingsRow title="Beim Start" description="Zuletzt geöffnetes Projekt wiederherstellen oder immer mit der Projektliste beginnen.">
                   <select value={settings.startupBehavior} onChange={(event) => void onGlobalChange({ startupBehavior: event.target.value as IdeSettings["startupBehavior"] })}>
                     <option value="restore">{t("Letztes Projekt öffnen")}</option>
@@ -1882,9 +1881,6 @@ export function SettingsDialog({
                     <option value="canary">{t("Canary")}</option>
                   </select>
                 </SettingsRow>
-                {window.kiwi?.platform === "win32" && <SettingsRow title="Update-Manifest" description="Optionales HTTPS-Manifest für eigene Windows-Updates. Ohne eigene Adresse nutzt Kiwi GitHub Releases.">
-                  <input className="settings-wide-input" type="url" value={settings.updateManifestUrl} onChange={(event) => void onGlobalChange({ updateManifestUrl: event.target.value })} placeholder={t("https://updates.example.org/kiwi.json")} />
-                </SettingsRow>}
                 <SettingsRow title="Jetzt prüfen" description="Kiwi sucht ein passendes Paket und prüft den Download per SHA-256.">
                   <div className="settings-update-actions">
                     <button
@@ -1903,18 +1899,12 @@ export function SettingsDialog({
                       <button className="primary-button" disabled={checkingUpdate} onClick={() => {
                         setCheckingUpdate(true);
                         void window.kiwi?.app.installUpdate(updateResult)
-                          .then(() => {
-                            if (manualUpdate) setUpdateResult({
-                              ...updateResult,
-                              reason: t("Update heruntergeladen. Das Paket wurde im Dateimanager angezeigt."),
-                            });
-                          })
                           .catch((error) => setUpdateResult({
                             ...updateResult,
                             reason: error instanceof Error ? error.message : t("Update konnte nicht installiert werden."),
                           }))
                           .finally(() => setCheckingUpdate(false));
-                      }}>{manualUpdate ? t("Update herunterladen") : t("Update installieren")} ({updateResult.version})</button>
+                      }}>{t("Update installieren")} ({updateResult.version})</button>
                     )}
                     {updateReleaseUrl && (
                       <button onClick={() => void onOpenUpdate(updateReleaseUrl)}>{t("GitHub Releases öffnen")}</button>

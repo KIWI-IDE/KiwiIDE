@@ -553,7 +553,10 @@ describe("safe update checks", () => {
       size: 100,
       browser_download_url: "https://untrusted.example.test/update",
     });
-    const service = new UpdateService({ get: () => ({ updateChannel: "stable" }) }, "1.0.0", "", async (url: URL) => {
+    const service = new UpdateService({ get: () => ({
+      updateChannel: "stable",
+      updateManifestUrl: "https://legacy.example.test/updates.json",
+    }) }, "1.0.0", "", async (url: URL) => {
       expect(url.origin + url.pathname).toBe("https://api.github.com/repos/KIWI-IDE/KiwiIDE/releases");
       return {
         ok: true,
