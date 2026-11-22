@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { locales, setActiveLocale, type Locale } from "./i18n";
+import { watchWindowAppearance } from "./window-appearance";
 import "./styles.css";
 
 /**
@@ -51,5 +52,6 @@ render();
 // The stored language can be stale — another machine's profile, or a setting
 // changed while this window was closed — so it is corrected from the settings
 // service as soon as that answers, and again whenever it changes.
-void window.kiwi?.settings.get().then((settings) => useLocale(settings?.locale)).catch(() => undefined);
-window.kiwi?.settings.onChanged(({ settings }) => useLocale(settings?.locale));
+if (window.kiwi) {
+  watchWindowAppearance(window.kiwi.settings, document.documentElement, (settings) => useLocale(settings.locale));
+}

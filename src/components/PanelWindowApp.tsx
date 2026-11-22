@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { PanelWindowCommand, PanelWindowSnapshot } from "../types";
-import { findTheme } from "../themes";
 import { StandaloneDocumentHeader, StandaloneWindowFrame } from "./StandaloneWindowLayout";
 import { PanelDebugView } from "./panel/PanelDebugView";
 import { PanelOutputView } from "./panel/PanelOutputView";
@@ -47,11 +46,6 @@ export function PanelWindowApp() {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", findTheme(snapshot?.theme || "").id);
-    document.documentElement.style.setProperty("--roundness", String(Math.max(0, Math.min(250, snapshot?.roundness ?? 100)) / 100));
-  }, [snapshot?.theme, snapshot?.roundness]);
 
   const send = useCallback((command: PanelWindowCommand) => window.kiwi?.panel.request(command), []);
 

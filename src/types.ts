@@ -394,13 +394,16 @@ export interface ProjectTask {
   group?: string;
 }
 
-/** One artifact as Maven Central reports it. */
+/** A published artifact and the repository that supplied it. */
 export interface DependencyCandidate {
   groupId: string;
   artifactId: string;
   version: string;
   packaging: string;
   updatedAt: number;
+  sourceId?: string;
+  sourceLabel?: string;
+  repositoryUrl?: string;
 }
 
 export interface DependencyAudit {
@@ -1328,6 +1331,7 @@ export interface DependencySelector {
 }
 
 export interface AddDependencyOptions {
+  sourceId?: string;
   buildFile?: string;
   useVersionCatalog?: boolean;
   catalogPath?: string;
@@ -1596,8 +1600,8 @@ export interface KiwiApi {
      */
     tasks(root: string, refresh?: boolean): Promise<{ type: string; tasks: ProjectTask[]; modules: string[]; profiles: BuildProfile[]; reason?: string }>;
     dependencies(root: string): Promise<string>;
-    searchDependencies(query: string, limit?: number): Promise<DependencyCandidate[]>;
-    dependencyVersions(groupId: string, artifactId: string): Promise<string[]>;
+    searchDependencies(query: string, limit?: number, sourceId?: string): Promise<DependencyCandidate[]>;
+    dependencyVersions(groupId: string, artifactId: string, sourceId?: string): Promise<string[]>;
     listDependencies(root: string): Promise<DependencyEditorModel>;
     addDependency(root: string, coordinates: { groupId: string; artifactId: string; version: string }, scope?: string, options?: AddDependencyOptions): Promise<DependencyMutationResult>;
     removeDependency(root: string, selector: DependencySelector): Promise<DependencyMutationResult>;

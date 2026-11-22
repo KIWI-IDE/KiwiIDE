@@ -1,7 +1,6 @@
 import { ArrowDownToLine, Maximize2, Minus, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import type { IdeSettings } from "../types";
-import { findTheme, personalizationVariables } from "../themes";
 import { KiwiLogo } from "./KiwiLogo";
 import { LazyTerminalScreen as TerminalScreen } from "./LazyTerminalScreen";
 import { t } from "../i18n";
@@ -29,11 +28,6 @@ export function TerminalWindowApp() {
   const [shell, setShell] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", findTheme(settings?.theme || "").id);
-    document.documentElement.style.setProperty("--roundness", String(Math.max(0, Math.min(250, settings?.uiRoundness ?? 100)) / 100));
-  }, [settings?.theme]);
 
   useEffect(() => {
     if (!window.kiwi) {
@@ -140,7 +134,6 @@ export function TerminalWindowApp() {
   };
 
   const shellStyle = settings ? {
-    ...personalizationVariables(settings),
     "--workspace-background-image": backgroundImageData ? `url(${JSON.stringify(backgroundImageData)})` : "none",
     "--workspace-background-opacity": String(settings.backgroundOpacity / 100),
     zoom: settings.uiScale,

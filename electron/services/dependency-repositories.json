@@ -1,0 +1,9 @@
+[
+  {"id":"central","label":"Maven Central","url":"https://repo.maven.apache.org/maven2/","groups":[],"artifacts":[]},
+  {"id":"google","label":"Google Maven","url":"https://dl.google.com/dl/android/maven2/","groups":["androidx.","com.android.","com.google.android.","com.google.firebase"],"artifacts":[]},
+  {"id":"papermc","label":"PaperMC","url":"https://repo.papermc.io/repository/maven-public/","groups":["io.papermc.","com.velocitypowered"],"artifacts":[["io.papermc.paper","paper-api","paper minecraft plugin"],["com.velocitypowered","velocity-api","velocity minecraft proxy"]]},
+  {"id":"spigot","label":"SpigotMC","url":"https://hub.spigotmc.org/nexus/content/groups/public/","groups":["org.spigotmc","org.bukkit"],"artifacts":[["org.spigotmc","spigot-api","spigot minecraft plugin"],["org.bukkit","bukkit","bukkit minecraft plugin"]]},
+  {"id":"fabric","label":"Fabric","url":"https://maven.fabricmc.net/","groups":["net.fabricmc"],"artifacts":[["net.fabricmc","fabric-loader","fabric minecraft mod loader"],["net.fabricmc.fabric-api","fabric-api","fabric minecraft mod api"],["net.fabricmc","yarn","fabric minecraft mappings yarn"]]},
+  {"id":"sponge","label":"Sponge","url":"https://repo.spongepowered.org/repository/maven-public/","groups":["org.spongepowered"],"artifacts":[["org.spongepowered","spongeapi","sponge minecraft plugin api"],["org.spongepowered","mixin","sponge minecraft mixin"]]},
+  {"id":"jitpack","label":"JitPack","url":"https://jitpack.io/","groups":["com.github."],"artifacts":[]}
+]

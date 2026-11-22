@@ -37,6 +37,10 @@ export const locales: Array<{ id: Locale; label: string }> = [
 
 /** German source text → English. */
 const english: Record<string, string> = {
+  "Dependency-Quelle": "Dependency source",
+  "Quelle": "Source",
+  "Alle Quellen": "All sources",
+  "Für JitPack groupId:artifactId eingeben, z. B. com.github.User:Repository.": "For JitPack, enter groupId:artifactId, for example com.github.User:Repository.",
   "Visueller Commit-Graph": "Visual commit graph",
   "Live Web-Preview öffnen": "Open live web preview",
   "NPM-Pakete verwalten": "Manage NPM packages",

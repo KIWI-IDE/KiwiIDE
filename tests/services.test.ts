@@ -331,7 +331,7 @@ describe("workbench settings", () => {
     });
     await service.update({ theme: "kiwi-light", fontSize: 19 });
     const reset = await service.reset();
-    expect(reset.theme).toBe("kiwi-new-dark");
+    expect(reset.theme).toBe("kiwi-nord");
     expect(reset.fontSize).toBe(14);
     expect(reset.recentProjects).toEqual(["C:\\Projects\\Kiwi"]);
     expect(reset.lastWorkspace).toBe("C:\\Projects\\Kiwi");
@@ -1694,6 +1694,7 @@ describe("adding a dependency", () => {
     const calls: URL[] = [];
     const service = new DependencyService(new PathGuard(), {}, async (url: URL) => {
       calls.push(url);
+      if (url.pathname !== "/solrsearch/select") return { ok: false, status: 404 };
       return {
         ok: true,
         json: async () => ({ response: { docs: [
@@ -1705,13 +1706,13 @@ describe("adding a dependency", () => {
 
     const found = await service.search("guava");
     expect(found).toEqual([
-      { groupId: "com.google.guava", artifactId: "guava", version: "33.0.0-jre", packaging: "bundle", updatedAt: 1 },
+      { groupId: "com.google.guava", artifactId: "guava", version: "33.0.0-jre", packaging: "bundle", updatedAt: 1, sourceId: "central", sourceLabel: "Maven Central", repositoryUrl: "https://repo.maven.apache.org/maven2/" },
     ]);
     expect(calls[0].protocol).toBe("https:");
     expect(calls[0].host).toBe("search.maven.org");
 
     await service.search("https://evil.example/?x=");
-    expect(calls[1].host).toBe("search.maven.org");
+    expect(calls.filter(url => url.pathname === "/solrsearch/select")[1].host).toBe("search.maven.org");
   });
 
   it("reports an unreachable registry instead of failing silently", async () => {

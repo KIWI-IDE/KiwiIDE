@@ -13,7 +13,15 @@ export function ProjectWizardWindowApp() {
     const loc = searchParams.get("initialLocation") || "";
     setInitialLocation(loc);
 
-    window.kiwi?.settings.get().then(setSettings).catch(() => undefined);
+    let disposed = false;
+    let changed = false;
+    const removeSettings = window.kiwi?.settings.onChanged(({ settings: value }) => {
+      changed = true;
+      if (!disposed) setSettings(value);
+    });
+    void window.kiwi?.settings.get().then((value) => {
+      if (!disposed && !changed) setSettings(value);
+    }).catch(() => undefined);
 
     const removeContext = window.kiwi?.app?.onWizardContext?.((context) => {
       if (context.initialLocation) setInitialLocation(context.initialLocation);
@@ -25,6 +33,8 @@ export function ProjectWizardWindowApp() {
     window.addEventListener("keydown", closeOnEscape);
 
     return () => {
+      disposed = true;
+      removeSettings?.();
       removeContext?.();
       window.removeEventListener("keydown", closeOnEscape);
     };

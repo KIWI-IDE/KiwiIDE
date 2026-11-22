@@ -17,7 +17,12 @@ const project = path.join(fixture, "hybrid");
 const userData = path.join(fixture, "userdata");
 const screenshotsOnly = process.argv.includes("--screenshots-only");
 const capture = screenshotsOnly || process.argv.includes("--capture");
-const cases = [
+const gradleOnly = process.argv.includes("--gradle-only");
+const gradleScript = gradleOnly ? await fs.readFile(path.join(root, "tests", "fixtures", "catalog-build.gradle.kts"), "utf8") : "";
+const cases = gradleOnly ? [
+  ["build.gradle.kts", "kotlin", `${gradleScript}\ndependencies {\n    compileOnly(libs.pa`, "libs.paperSpigot"],
+  ["aliases.gradle.kts", "kotlin", `${gradleScript}\ndependencies {\n    compileOnly(libs.fastAsyncWorldEdit`, "libs.fastAsyncWorldEditBukkit"],
+] : [
   ["Main.kt", "kotlin", "fun helper() {}\npri", "println"],
   ["main.py", "python", "def helper():\n    pass\npri", "print"],
   ["main.rs", "rust", "fn helper() {}\npri", "println!"],
@@ -109,7 +114,13 @@ async function press(cdp, key, code, windowsVirtualKeyCode, modifiers = 0) {
 
 await fs.mkdir(path.join(project, ".kiwi"), { recursive: true });
 await fs.mkdir(userData, { recursive: true });
-await fs.writeFile(path.join(project, ".kiwi", "language.json"), JSON.stringify({ version: 1, language: "python" }));
+if (!gradleOnly) await fs.writeFile(path.join(project, ".kiwi", "language.json"), JSON.stringify({ version: 1, language: "python" }));
+if (gradleOnly) {
+  await fs.writeFile(path.join(project, ".kiwi", "project.json"), JSON.stringify({ autoSyncBuild: false, gradleOffline: true }));
+  await fs.mkdir(path.join(project, "gradle"), { recursive: true });
+  await fs.writeFile(path.join(project, "gradle.properties"), "org.gradle.daemon=false\norg.gradle.java.installations.auto-download=false\n");
+  await fs.writeFile(path.join(project, "gradle", "libs.versions.toml"), '[versions]\npaper = "test-version"\n[libraries]\npaperSpigot = { module = "io.papermc.paper:paper-api", version.ref = "paper" }\nfastAsyncWorldEditBukkit = "com.example:worldedit-bukkit:test-version"\nfastAsyncWorldEditCore = "com.example:worldedit-core:test-version"\n');
+}
 await Promise.all(cases.map(([file, _language, content]) => fs.writeFile(path.join(project, file), content)));
 // This gate must prove that the fallback is useful without downloaded servers.
 // The server service has a separate real-protocol integration suite.
@@ -168,6 +179,11 @@ try {
       await press(cdp, " ", "Space", 32, 2);
       return false;
     }, 20_000, `${name} visible completion ${expected}`);
+    if (gradleOnly) {
+      await press(cdp, "Enter", "Enter", 13);
+      await press(cdp, "s", "KeyS", 83, 2);
+      await until(async () => (await fs.readFile(file, "utf8")).trimEnd().endsWith(expected), 10_000, `accepted completion ${expected}`);
+    }
     if (capture && language === "python") {
       const screenshot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       await fs.writeFile(path.join(root, ".kiwi", "polyglot-editor.png"), Buffer.from(screenshot.data, "base64"));
@@ -188,8 +204,8 @@ try {
     await evaluate(settings, "setTimeout(() => window.kiwi.app.close(), 50); true");
   }
   const health = await evaluate(cdp, "window.kiwi.app.health()", true);
-  assert.equal(health.language.sessions, 0, "A non-Java project must not start JDT LS.");
-  console.log(screenshotsOnly ? "Hybrid editor screenshots saved: .kiwi/polyglot-editor.png and .kiwi/polyglot-settings.png." : `Hybrid editor smoke passed: ${cases.length} file languages, all 11 native families, local completions and web workers.`);
+  if (!gradleOnly) assert.equal(health.language.sessions, 0, "A non-Java project must not start JDT LS.");
+  console.log(gradleOnly ? "Gradle Kotlin completion passed: reported script, live catalog aliases, visible suggestions and accepted edits." : screenshotsOnly ? "Hybrid editor screenshots saved: .kiwi/polyglot-editor.png and .kiwi/polyglot-settings.png." : `Hybrid editor smoke passed: ${cases.length} file languages, all 11 native families, local completions and web workers.`);
 } catch (error) {
   throw new Error(`${error.message}\n--- Kiwi output ---\n${logs.slice(-4_000)}`);
 } finally {
@@ -210,6 +226,6 @@ try {
   }
   // Delete only the exact temporary directory this run created.
   if (path.dirname(path.resolve(fixture)) === temporaryRoot && path.basename(fixture).startsWith("kiwi-polyglot-editor-")) {
-    await fs.rm(fixture, { recursive: true, force: true });
+    await fs.rm(fixture, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
   }
 }

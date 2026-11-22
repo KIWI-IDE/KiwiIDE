@@ -218,7 +218,7 @@ describe("accent palette", () => {
   });
 
   it("falls back rather than passing nonsense into a stylesheet", () => {
-    expect(accentPalette("nicht-einmal-eine-farbe")["--accent"]).toBe("#7ad83b");
+    expect(accentPalette("nicht-einmal-eine-farbe")["--accent"]).toBe("#88c0d0");
     expect(accentPalette("#ABCDEF")["--accent"]).toBe("#abcdef");
   });
 });

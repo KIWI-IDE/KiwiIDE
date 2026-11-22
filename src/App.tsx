@@ -172,7 +172,7 @@ import {
   treeExpansionPaths,
   type TaskComment,
 } from "./utils";
-import { accentPalette, findTheme, monacoThemeId, personalizationVariables, resolveTokenColors, resolveWorkbenchColors, themes } from "./themes";
+import { findTheme, monacoThemeId, resolveTokenColors, resolveWorkbenchColors, themes } from "./themes";
 import { javaLanguageDefinition, javaKeywords, javaKeywordScope } from "./language/java-tokenizer";
 import { HTTP_LANGUAGE_ID, installHttpLanguage } from "./language/http-language";
 import { installBuildFileCompletion } from "./language/build-completion";
@@ -1799,11 +1799,6 @@ function IdeApp() {
   const keys = useMemo(() => resolveKeybindings(settings.customKeybindings), [settings.customKeybindings]);
 
   const shellStyle = {
-    // The whole accent family, not just one of its four tokens: the stylesheet
-    // derives --green from --accent, so overriding only --green left every
-    // rule written against --accent showing the theme's colour instead of the
-    // chosen one — two accents side by side in the same window.
-    ...accentPalette(settings.accentColor),
     "--explorer-icon-size": `${settings.explorerIconSize}px`,
     "--explorer-indent": `${settings.explorerIndent}px`,
     "--sidebar-width": `${sidebarWidth}px`,
@@ -1890,36 +1885,15 @@ function IdeApp() {
     };
   }, []);
 
-  // The whole palette hangs off this attribute; styles.css derives every
-  // surface, border and text step from the anchors it selects.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", findTheme(settings.theme).id);
-  }, [settings.theme]);
-  // The ramps are derived on the document element, where the theme lives, so
-  // the accent and the nudge on top of it have to be set there too: a value
-  // inherited from the root is already resolved by the time a descendant tries
-  // to change what it was derived from.
-  useEffect(() => {
-    const style = document.documentElement.style;
-    const values = personalizationVariables(settings);
-    for (const [name, value] of Object.entries(values)) style.setProperty(name, value);
-    return () => {
-      for (const name of Object.keys(values)) style.removeProperty(name);
-    };
-  }, [
-    settings.accentColor, settings.theme, settings.themeShade, settings.themeTint,
-    settings.themeContrast, settings.accentIntensity, settings.themeColorOverrides,
-    settings.uiRoundness, settings.borderStrength, settings.shadowStrength, settings.uiFont,
-  ]);
   // Monaco needs its themes rebuilt when the wallpaper is switched on or off,
   // because that decides whether the editor and minimap clear transparently.
   backgroundImageDataRef.current = backgroundImageData;
   useEffect(() => {
     const monaco = monacoRef.current;
     if (!monaco) return;
-    defineMonacoThemes(monaco, Boolean(backgroundImageData), settings.editorTokenColors, settings.editorColorScheme, settings.themeColorOverrides);
+    defineMonacoThemes(monaco, Boolean(backgroundImageData), settings.editorTokenColors, settings.editorColorScheme, settings.themeColorOverrides, settings.accentColor);
     monaco.editor.setTheme(monacoThemeId(settings.theme));
-  }, [backgroundImageData, settings.editorColorScheme, settings.editorTokenColors, settings.theme, settings.themeColorOverrides]);
+  }, [backgroundImageData, settings.editorColorScheme, settings.editorTokenColors, settings.theme, settings.themeColorOverrides, settings.accentColor]);
   useEffect(() => {
     const bodyStyle = document.body.style as CSSStyleDeclaration & { zoom: string };
     bodyStyle.zoom = String(settings.uiScale);
@@ -3427,11 +3401,11 @@ function IdeApp() {
   // its search, and a prop that changes identity restarts that debounce for
   // reasons that have nothing to do with what was typed.
   const searchDependencies = useCallback(
-    (query: string) => window.kiwi!.project.searchDependencies(query),
+    (query: string, sourceId?: string) => window.kiwi!.project.searchDependencies(query, 25, sourceId),
     [],
   );
   const dependencyVersions = useCallback(
-    (groupId: string, artifactId: string) => window.kiwi!.project.dependencyVersions(groupId, artifactId),
+    (groupId: string, artifactId: string, sourceId?: string) => window.kiwi!.project.dependencyVersions(groupId, artifactId, sourceId),
     [],
   );
   /**
@@ -7529,8 +7503,8 @@ function IdeApp() {
     installHttpLanguage(monaco, (line) => sendHttpRequestRef.current(line));
     // Completion for pom.xml and Gradle scripts. Registered per language and
     // filtered by file name, so an ordinary XML or Groovy file is untouched.
-    if (window.kiwi) installBuildFileCompletion(monaco, window.kiwi);
-    defineMonacoThemes(monaco, Boolean(backgroundImageDataRef.current), settingsRef.current.editorTokenColors, settingsRef.current.editorColorScheme, settingsRef.current.themeColorOverrides);
+    if (window.kiwi) installBuildFileCompletion(monaco, window.kiwi, () => workspaceRootRef.current);
+    defineMonacoThemes(monaco, Boolean(backgroundImageDataRef.current), settingsRef.current.editorTokenColors, settingsRef.current.editorColorScheme, settingsRef.current.themeColorOverrides, settingsRef.current.accentColor);
     /**
      * Where Ctrl+Click lands.
      *

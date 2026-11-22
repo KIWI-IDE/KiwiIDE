@@ -1,7 +1,6 @@
 import { Settings } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IdeSettings, ProjectInfo, ProjectSettings } from "../types";
-import { findTheme } from "../themes";
 import { SettingsDialog } from "./SettingsDialog";
 import { createSettingsBundle, mergeLayouts, readSettingsBundle } from "../settings-transfer";
 import { StandaloneWindowFrame } from "./StandaloneWindowLayout";
@@ -23,13 +22,6 @@ export function SettingsWindowApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [backgroundImageData, setBackgroundImageData] = useState("");
-
-  // The settings window is its own BrowserWindow, so it carries its own theme
-  // attribute rather than inheriting one from the workbench.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", findTheme(settings?.theme || "").id);
-    document.documentElement.style.setProperty("--roundness", String(Math.max(0, Math.min(250, settings?.uiRoundness ?? 100)) / 100));
-  }, [settings?.theme]);
 
   const loadProject = useCallback(async (root: string) => {
     const request = requests.current.begin(root);

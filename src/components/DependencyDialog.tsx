@@ -3,14 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AddDependencyOptions, VersionCatalogInfo } from "../types";
 import { buildFileLabel, mvnRepositoryUrl } from "../language/build-files";
 import { t } from "../i18n";
-
-export interface DependencyCandidate {
-  groupId: string;
-  artifactId: string;
-  version: string;
-  packaging: string;
-  updatedAt: number;
-}
+import repositories from "../../electron/services/dependency-repositories.json";
+export type { DependencyCandidate } from "../types";
+import type { DependencyCandidate } from "../types";
 
 const MAVEN_SCOPES = ["compile", "provided", "runtime", "test"];
 const GRADLE_CONFIGURATIONS = ["implementation", "api", "compileOnly", "runtimeOnly", "testImplementation"];
@@ -87,8 +82,8 @@ export function DependencyDialog({
   catalogs = [],
 }: {
   buildType: string;
-  onSearch: (query: string) => Promise<DependencyCandidate[]>;
-  onVersions: (groupId: string, artifactId: string) => Promise<string[]>;
+  onSearch: (query: string, sourceId?: string) => Promise<DependencyCandidate[]>;
+  onVersions: (groupId: string, artifactId: string, sourceId?: string) => Promise<string[]>;
   onAdd: (coordinates: { groupId: string; artifactId: string; version: string }, scope: string, options?: AddDependencyOptions) => Promise<void>;
   onClose: () => void;
   buildFiles?: string[];
@@ -100,6 +95,7 @@ export function DependencyDialog({
   const gradle = buildType === "Gradle";
   const scopes = gradle ? GRADLE_CONFIGURATIONS : MAVEN_SCOPES;
   const [query, setQuery] = useState("");
+  const [sourceId, setSourceId] = useState("");
   const [results, setResults] = useState<DependencyCandidate[]>([]);
   const [selected, setSelected] = useState<DependencyCandidate | null>(null);
   const [versions, setVersions] = useState<string[]>([]);
@@ -149,7 +145,8 @@ export function DependencyDialog({
 
   useEffect(() => {
     const text = intent.search;
-    requestedQueryRef.current = text;
+    const requestKey = `${sourceId}:${text}`;
+    requestedQueryRef.current = requestKey;
     if (!text) {
       setResults([]);
       setSearching(false);
@@ -166,28 +163,28 @@ export function DependencyDialog({
       setSearching(true);
       setError("");
       try {
-        const found = await onSearch(text);
-        if (requestedQueryRef.current === text) setResults(found);
+        const found = await onSearch(text, sourceId || undefined);
+        if (requestedQueryRef.current === requestKey) setResults(found);
       } catch (reason) {
-        if (requestedQueryRef.current === text) {
+        if (requestedQueryRef.current === requestKey) {
           setError(reason instanceof Error ? reason.message : "Suche fehlgeschlagen.");
           setResults([]);
         }
       } finally {
-        if (requestedQueryRef.current === text) setSearching(false);
+        if (requestedQueryRef.current === requestKey) setSearching(false);
       }
     }, 350);
     return () => window.clearTimeout(handle);
-  }, [intent.search, onSearch]);
+  }, [intent.search, onSearch, sourceId]);
 
   const choose = async (candidate: DependencyCandidate) => {
-    const coordinate = `${candidate.groupId}:${candidate.artifactId}`;
+    const coordinate = `${candidate.sourceId || ""}:${candidate.groupId}:${candidate.artifactId}`;
     requestedRef.current = coordinate;
     setSelected(candidate);
     setVersion(candidate.version);
     setVersions([candidate.version]);
     try {
-      const published = await onVersions(candidate.groupId, candidate.artifactId);
+      const published = await onVersions(candidate.groupId, candidate.artifactId, candidate.sourceId);
       // Walking the list with the arrow keys asks for one of these per result,
       // and they come back in whatever order the network decides. Only the
       // answer for the entry that is still chosen may be shown — otherwise the
@@ -236,6 +233,7 @@ export function DependencyDialog({
     try {
       const normalizedAlias = (alias || target.artifactId).replace(/[^A-Za-z0-9_.-]/g, "-");
       await onAdd(target, scope, {
+        sourceId: selected?.sourceId || sourceId || undefined,
         buildFile: buildFile || undefined,
         useVersionCatalog: gradle && useVersionCatalog,
         catalogPath: gradle && useVersionCatalog ? catalogPath || undefined : undefined,
@@ -278,7 +276,7 @@ export function DependencyDialog({
             value={query}
             onChange={(event) => {
               requestedRef.current = "";
-              requestedQueryRef.current = dependencyQueryIntent(event.target.value).search;
+              requestedQueryRef.current = `${sourceId}:${dependencyQueryIntent(event.target.value).search}`;
               setQuery(event.target.value);
               setSelected(null);
               setCursor(-1);
@@ -287,6 +285,24 @@ export function DependencyDialog({
             spellCheck={false}
           />
         </label>
+
+        <label className="dependency-source-picker">
+          <span>{t("Quelle")}</span>
+          <select aria-label={t("Dependency-Quelle")} value={sourceId} onChange={(event) => {
+            const next = event.target.value;
+            requestedRef.current = "";
+            requestedQueryRef.current = `${next}:${intent.search}`;
+            setSourceId(next);
+            setSelected(null);
+            setResults([]);
+            setCursor(-1);
+          }}>
+            <option value="">{t("Alle Quellen")}</option>
+            {repositories.map(source => <option key={source.id} value={source.id}>{source.label}</option>)}
+          </select>
+        </label>
+
+        {sourceId === "jitpack" && <p className="dependency-pasted">{t("Für JitPack groupId:artifactId eingeben, z. B. com.github.User:Repository.")}</p>}
 
         {pasted && (
           <p className="dependency-pasted">
@@ -306,7 +322,7 @@ export function DependencyDialog({
               >
                 <button type="button" onClick={() => void choose(candidate)}>
                   <strong>{candidate.artifactId}</strong>
-                  <small>{candidate.groupId}</small>
+                  <small>{candidate.groupId}{candidate.sourceLabel ? ` · ${candidate.sourceLabel}` : ""}</small>
                   <span>{candidate.version}</span>
                 </button>
                 {/* The page a human reads before deciding. It cannot be searched

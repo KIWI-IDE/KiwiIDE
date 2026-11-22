@@ -2,24 +2,25 @@
  * Wires the build-file completion into Monaco.
  *
  * The rules live in {@link ./build-files}; this only turns them into Monaco
- * items and asks Maven Central when a coordinate is being typed. Registered for
+ * items and asks the package sources when a coordinate is being typed. Registered for
  * the languages a build file resolves to, and filtered by file name so an
  * ordinary XML or Groovy file is left alone.
  *
- * The search goes to Maven Central's own API. mvnrepository.com — the site
+ * The search combines public Maven repositories. mvnrepository.com — the site
  * people mean when they say "look it up" — answers a program with a Cloudflare
  * challenge and cannot be queried at all, so every proposal carries a link to
  * its page there instead, which is the half of that site a machine can honour.
  */
 
 import type * as MonacoEditor from "monaco-editor";
-import type { DependencyCandidate, KiwiApi } from "../types";
+import type { DependencyCandidate, KiwiApi, VersionCatalogInfo } from "../types";
 import {
   buildFileKind,
   coordinateQueryAt,
   coordinateSpanAt,
   gradleCompletions,
   gradleCoordinateText,
+  gradleCatalogQueryAt,
   mavenCompletions,
   mavenDependencyEdits,
   mvnRepositoryUrl,
@@ -122,9 +123,17 @@ function artifactDocumentation(candidate: ArtifactCoordinate) {
  * Safe to call again — a second call replaces the previous registration rather
  * than adding a second provider that would double every suggestion.
  */
-export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: KiwiApi): void {
+export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: KiwiApi, workspaceRoot: () => string = () => ""): void {
   for (const disposable of installed) disposable.dispose();
   installed = [];
+  const catalogs = new Map<string, { expires: number; value: Promise<VersionCatalogInfo[]> }>();
+  const loadCatalogs = (root: string) => {
+    const cached = catalogs.get(root);
+    if (cached && cached.expires > Date.now()) return cached.value;
+    const value = api.project.listDependencies(root).then(model => model.catalogs).catch(() => []);
+    catalogs.set(root, { expires: Date.now() + 1500, value });
+    return value;
+  };
 
   installed.push(monaco.editor.registerCommand(OPEN_ARTIFACT_PAGE_COMMAND, (_accessor, url: string) => {
     void api.app.openArtifactPage(String(url || "")).catch(() => undefined);
@@ -135,7 +144,7 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
       // A coordinate is typed inside a string or an element, where Monaco would
       // not ask on its own.
       triggerCharacters: ["<", ".", ":", "\"", "'", " "],
-      provideCompletionItems: async (model, position) => {
+      provideCompletionItems: async (model, position, _context, cancellation) => {
         const kind = buildFileKind(model.uri.fsPath);
         if (!kind) return { suggestions: [] };
 
@@ -159,6 +168,38 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
             endColumn: to.column,
           };
         };
+
+        if (kind === "gradle") {
+          const accessor = gradleCatalogQueryAt(text, offset);
+          const root = workspaceRoot();
+          if (accessor && root) {
+            const allCatalogs = await loadCatalogs(root);
+            // Do not publish an answer into a different project or draft.
+            if (cancellation?.isCancellationRequested || model.isDisposed?.() || workspaceRoot() !== root || model.getValue() !== text) return { suggestions: [] };
+            const matchingCatalogs = allCatalogs.filter(entry => !accessor.catalog || entry.name === accessor.catalog);
+            if (matchingCatalogs.length) {
+              const members = matchingCatalogs.flatMap(catalog => [
+                ...catalog.libraries.map(library => ({
+                  accessor: `${catalog.name}.${library.alias.replace(/[-_]+/g, ".")}`,
+                  detail: `${library.groupId}:${library.artifactId}${library.version ? `:${library.version}` : ""}`,
+                })),
+                ...catalog.versions.map(version => ({
+                  accessor: `${catalog.name}.versions.${version.key.replace(/[-_]+/g, ".")}`,
+                  detail: version.version,
+                })),
+              ]);
+              return { suggestions: members.filter(member => member.accessor.toLowerCase().startsWith(accessor.accessor.toLowerCase())).map(member => ({
+                label: member.accessor,
+                kind: monaco.languages.CompletionItemKind.Module,
+                detail: member.detail,
+                insertText: member.accessor,
+                range: spanToRange(accessor),
+                filterText: member.accessor,
+                sortText: `0-${member.accessor}`,
+              })) };
+            }
+          }
+        }
 
         const coordinate = coordinateQueryAt(text, offset, kind);
         if (coordinate) {
@@ -206,7 +247,7 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
                   return {
                     label,
                     kind: monaco.languages.CompletionItemKind.Module,
-                    detail: candidate.version,
+                    detail: `${candidate.version}${candidate.sourceLabel ? ` · ${candidate.sourceLabel}` : ""}`,
                     documentation,
                     insertText: gradleCoordinateText(candidate),
                     filterText: `${candidate.artifactId} ${label}`,

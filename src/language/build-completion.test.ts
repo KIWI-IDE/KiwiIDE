@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { installBuildFileCompletion } from "./build-completion";
 
 /**
@@ -35,12 +36,12 @@ const fakeMonaco = () => {
 };
 
 /** A model whose caret sits at the end of the given text. */
-const modelFor = (text: string, fsPath: string) => {
-  const lines = text.split("\n");
+const modelFor = (text: string, fsPath: string, offset = text.length) => {
+  const lines = text.slice(0, offset).split("\n");
   return {
     uri: { fsPath },
     getValue: () => text,
-    getOffsetAt: () => text.length,
+    getOffsetAt: () => offset,
     getPositionAt: (offset: number) => {
       const before = text.slice(0, offset).split("\n");
       return { lineNumber: before.length, column: before[before.length - 1].length + 1 };
@@ -70,11 +71,11 @@ const apiWith = (search: unknown, versions: unknown = async () => []) => ({
 }) as never;
 
 /** Drives one completion request against a freshly installed provider. */
-async function complete(text: string, fsPath: string, api: unknown) {
+async function complete(text: string, fsPath: string, api: unknown, root = () => "", offset = text.length) {
   const { providers, monaco, commands } = fakeMonaco();
-  installBuildFileCompletion(monaco, api as never);
-  const model = modelFor(text, fsPath);
-  const lines = text.split("\n");
+  installBuildFileCompletion(monaco, api as never, root);
+  const model = modelFor(text, fsPath, offset);
+  const lines = text.slice(0, offset).split("\n");
   const position = { lineNumber: lines.length, column: lines[lines.length - 1].length + 1 };
   const result = await providers[0].provideCompletionItems(model, position);
   return { ...result, commands, model };
@@ -183,5 +184,53 @@ describe("completing a dependency from an online search", () => {
       apiWith(async () => [gson]),
     );
     expect(suggestions.some((item: { label: string }) => item.label === "implementation")).toBe(true);
+  });
+});
+
+describe("Kotlin Gradle scripts with version catalogs", () => {
+  const script = readFileSync(new URL("../../tests/fixtures/catalog-build.gradle.kts", import.meta.url), "utf8");
+  const aliases = ["lombok", "paperSpigot", "labyMod", "citizens", "effectLib", "modelEngine", "fanyHologram", "dynamicDyalogs", "phoenixCrates", "coreApi", "corePaper", "fastAsyncWorldEditBukkit", "fastAsyncWorldEditCore", "test-library"];
+  const catalogs = [{ name: "libs", path: "C:/projekt/gradle/libs.versions.toml", versions: [{ key: "paper-version", version: "test-version", editable: true }], libraries: aliases.map(alias => ({ alias, groupId: "test.group", artifactId: alias, version: "test-version", declaredVersion: "test-version" })) }];
+  const localApi = () => ({ project: { listDependencies: vi.fn(async () => ({ catalogs })), searchDependencies: vi.fn(), dependencyVersions: vi.fn() }, app: { openArtifactPage: vi.fn() } });
+
+  it("completes actual aliases in the reported script without contacting a registry", async () => {
+    const api = localApi();
+    const offset = script.indexOf("libs.paperSpigot") + "libs.pa".length;
+    const result = await complete(script, "C:/projekt/build.gradle.kts", api, () => "C:/projekt", offset);
+    expect(result.suggestions.map((item: any) => item.label)).toEqual(["libs.paperSpigot"]);
+    expect(result.suggestions[0].insertText).toBe("libs.paperSpigot");
+    expect(result.suggestions[0].range.endColumn - result.suggestions[0].range.startColumn).toBe("libs.paperSpigot".length);
+    expect(api.project.searchDependencies).not.toHaveBeenCalled();
+    expect(api.project.dependencyVersions).not.toHaveBeenCalled();
+  });
+
+  it("keeps camelCase aliases and converts hyphenated keys to Gradle accessors", async () => {
+    for (const [typed, expected] of [["libs.fast", "libs.fastAsyncWorldEditBukkit"], ["libs.test.", "libs.test.library"], ["libs.versions.pa", "libs.versions.paper.version"]]) {
+      const result = await complete(`dependencies { compileOnly(${typed}`, "C:/projekt/build.gradle.kts", localApi(), () => "C:/projekt");
+      expect(result.suggestions.some((item: any) => item.label === expected)).toBe(true);
+    }
+  });
+
+  it("offers catalog libraries inside empty dependency arguments", async () => {
+    const result = await complete('dependencies { compileOnly(', "C:/projekt/build.gradle.kts", localApi(), () => "C:/projekt");
+    expect(result.suggestions.some((item: any) => item.label === "libs.paperSpigot")).toBe(true);
+    expect(result.suggestions.some((item: any) => item.label === "libs.fastAsyncWorldEditBukkit")).toBe(true);
+  });
+
+  it("completes dependency options and typed task options inside the script", async () => {
+    for (const [needle, expected] of [["isTransitive = false", "isTransitive"], ["options.encoding", "encoding"], ["withSourcesJar()", "withSourcesJar"]]) {
+      const end = script.indexOf(needle) + (needle.startsWith("options.") ? "options.en".length : 3);
+      const result = await complete(script, "C:/projekt/build.gradle.kts", localApi(), () => "C:/projekt", end);
+      expect(result.suggestions.some((item: any) => item.label === expected), needle).toBe(true);
+    }
+  });
+
+  it("does not treat comments, quoted URLs or environment variable names as catalogs", async () => {
+    for (const text of ['// libs.pa', '/* { nested /* } */ libs.pa', 'val text = "libs.pa', 'val text = """libs.pa', 'repositories { maven { url = uri("https://libs.pa']) {
+      const api = localApi();
+      const result = await complete(text, "C:/projekt/build.gradle.kts", api, () => "C:/projekt");
+      expect(result.suggestions).toEqual([]);
+      expect(api.project.listDependencies).not.toHaveBeenCalled();
+    }
   });
 });

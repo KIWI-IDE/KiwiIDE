@@ -35,12 +35,13 @@ try {
           version: "2.0.0-" + "release".repeat(35), packaging: "jar", updatedAt: 0,
         }));
         window.versionRequests = [];
+        window.searches = [];
         window.added = [];
         createRoot(document.getElementById("root")).render(
           <DependencyDialog buildType="Maven" buildFiles={["/project/pom.xml"]}
-            onSearch={async () => candidates}
-            onVersions={(group, artifact) => new Promise(resolve => window.versionRequests.push({artifact, resolve}))}
-            onAdd={async target => { window.added.push(target); }}
+            onSearch={async (query, source) => { window.searches.push({query, source}); return candidates.map(candidate => ({...candidate, sourceId:source || "central", sourceLabel:source || "Maven Central"})); }}
+            onVersions={(group, artifact, source) => new Promise(resolve => window.versionRequests.push({artifact, source, resolve}))}
+            onAdd={async (target, scope, options) => { window.added.push({...target, sourceId:options.sourceId}); }}
             onClose={() => { window.closed = true; }}
           />
         );
@@ -109,7 +110,16 @@ try {
     const wait = () => document.querySelectorAll(".dependency-result").length === 30 ? resolve(true) : setTimeout(wait, 25);
     wait();
   })`);
+  await evaluate(`(() => {
+    const select = document.querySelector('.dependency-source-picker select');
+    select.value = 'fabric'; select.dispatchEvent(new Event('change', {bubbles:true}));
+  })()`);
+  await evaluate(`new Promise(resolve => {
+    const wait = () => window.searches.at(-1)?.source === 'fabric' && document.querySelectorAll('.dependency-result').length === 30 ? resolve(true) : setTimeout(wait, 25);
+    wait();
+  })`);
   await evaluate('document.querySelector(".dependency-result button").click()');
+  assert.equal(await evaluate('window.versionRequests[0].source'), "fabric", "Versions came from a different source");
   await evaluate('window.versionRequests[0].resolve(["1.9.0", "1.8.0"])');
   await evaluate('new Promise(resolve => setTimeout(resolve, 50))');
   const layout = await evaluate(`(() => {
@@ -137,7 +147,8 @@ try {
   assert.equal(keyboard.requests, 1, "Changing version selected a different dependency");
   await evaluate('document.querySelector(".dependency-dialog .primary-button").click()');
   assert.deepEqual(await evaluate('window.added.map(entry => entry.artifactId)'), ["library-0"]);
-  console.log("Dependency selection passed: action bar, long versions, selected version, keyboard and add.");
+  assert.equal(await evaluate('window.added[0].sourceId'), "fabric", "Import lost the selected repository");
+  console.log("Dependency selection passed: source filter, matching versions, action bar, keyboard and repository-aware import.");
 } finally {
   socket?.close();
   if (child && child.exitCode === null) {

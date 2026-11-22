@@ -1,7 +1,6 @@
 import { Maximize2, Minus, X } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import type { IdeSettings } from "../types";
-import { personalizationVariables } from "../themes";
 import { KiwiLogo } from "./KiwiLogo";
 import { t } from "../i18n";
 
@@ -24,7 +23,6 @@ export function StandaloneWindowFrame({
 }) {
   const projectName = projectRoot?.split(/[\\/]/).filter(Boolean).at(-1) || "";
   const shellStyle = settings ? {
-    ...personalizationVariables(settings),
     "--workspace-background-image": backgroundImageData ? `url(${JSON.stringify(backgroundImageData)})` : "none",
     "--workspace-background-opacity": String(settings.backgroundOpacity / 100),
     zoom: settings.uiScale,

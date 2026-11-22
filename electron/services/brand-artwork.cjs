@@ -65,8 +65,13 @@ function radiusRule(radius) {
 }
 
 /** `linear-gradient(158deg, #f2fa7a 0%, #86e455 40%, #23bd77 100%)`. */
-function gradientRule(shape) {
-  const stops = shape.stops.map(([at, colour]) => `${colour} ${at}%`).join(", ");
+function gradientRule(shape, themed = false) {
+  const palette = {
+    one: ["var(--accent-bright)", "var(--accent)", "var(--accent-dim)"],
+    two: ["var(--accent)", "var(--accent-dim)", "var(--panel-00)"],
+    three: ["var(--panel-00)", "var(--accent-dim)", "var(--accent)"],
+  };
+  const stops = shape.stops.map(([at, colour], index) => `${themed ? palette[shape.name][index] : colour} ${at}%`).join(", ");
   return `linear-gradient(${shape.angle}deg, ${stops})`;
 }
 
@@ -76,7 +81,7 @@ function gradientRule(shape) {
  * `drift` names the keyframes to animate with, because the splash and the
  * stylesheet cannot share one name: the splash is a document of its own.
  */
-function artworkCss(scope, drift) {
+function artworkCss(scope, drift, themed = false) {
   const lines = [
     `${scope} i {`,
     "  position: absolute; display: block;",
@@ -88,7 +93,7 @@ function artworkCss(scope, drift) {
       `  inset: ${shape.inset.map((value) => `${value}%`).join(" ")};`,
     ];
     if (shape.radius !== ROUNDED) rules.push(`  border-radius: ${radiusRule(shape.radius)};`);
-    rules.push(`  background: ${gradientRule(shape)};`);
+    rules.push(`  background: ${gradientRule(shape, themed)};`);
     if (shape.opacity !== 1) rules.push(`  opacity: ${String(shape.opacity).replace(/^0/, "")};`);
     rules.push(`  animation: ${drift} ${shape.drift.seconds}s ease-in-out infinite${shape.drift.reverse ? " reverse" : ""};`);
     lines.push(`${scope} .${shape.name} {`, ...rules, "}");

@@ -13,9 +13,10 @@ const { assertExternalLinkUrl } = require("./services/external-link-service.cjs"
 const { PolyglotLanguageService } = require("./services/polyglot-language-service.cjs");
 const { PolyglotProjectService } = require("./services/polyglot-project-service.cjs");
 const { installManagedLanguageServer, installAllLanguageServers } = require("./services/language-server-installer.cjs");
-const { ARTWORK_GROUND, ARTWORK_DRIFT, artworkCss, artworkMarkup } = require("./services/brand-artwork.cjs");
+const { ARTWORK_DRIFT, artworkCss, artworkMarkup } = require("./services/brand-artwork.cjs");
 const { DropTokenService } = require("./services/drop-token-service.cjs");
-const { SettingsService, startupWindowKind } = require("./services/settings-service.cjs");
+const { SettingsService, startupWindowKind, defaults: defaultSettings, migrateSettings } = require("./services/settings-service.cjs");
+const { splashAppearance } = require("./services/splash-appearance.cjs");
 const { WorkspaceStateService } = require("./services/workspace-state-service.cjs");
 const { SessionStoreService } = require("./services/session-store-service.cjs");
 const { WorkspaceService } = require("./services/workspace-service.cjs");
@@ -477,6 +478,19 @@ function loadWindow(browserWindow, kind, context = {}) {
 }
 
 function createStartupSplash() {
+  let appearanceSettings = defaultSettings;
+  try {
+    appearanceSettings = migrateSettings(JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8")));
+  } catch { /* A fresh profile uses the default theme. */ }
+  let stylesheet = "";
+  try {
+    const cssDirectory = path.join(rendererRoot.directory, "assets");
+    const cssFile = fs.readdirSync(cssDirectory).find(name => /^index-.*\.css$/.test(name));
+    stylesheet = fs.readFileSync(path.join(cssDirectory, cssFile), "utf8");
+  } catch {
+    try { stylesheet = fs.readFileSync(path.join(__dirname, "..", "src", "styles.css"), "utf8"); } catch { /* Renderer not built yet. */ }
+  }
+  const appearance = splashAppearance(stylesheet, appearanceSettings);
   const iconPath = path.join(__dirname, "..", "assets", "icons", "kiwi-256.png");
   const iconData = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath).toDataURL() : "";
   splashStartedAt = Date.now();
@@ -493,25 +507,26 @@ function createStartupSplash() {
     skipTaskbar: true,
     alwaysOnTop: true,
     center: true,
-    backgroundColor: "#091419",
+    backgroundColor: "#262b35",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
-  const markImage = iconData ? `<img src="${iconData}" alt="">` : "";
+  const markImage = iconData ? `<svg width="28" height="28" viewBox="0 0 100 100" aria-hidden="true"><defs><filter id="splash-logo" color-interpolation-filters="sRGB"><feFlood flood-color="var(--accent)" result="accent"/><feComposite in="accent" in2="SourceGraphic" operator="in" result="tint"/><feBlend in="tint" in2="SourceGraphic" mode="color"/></filter></defs><image href="${iconData}" width="100" height="100" filter="url(#splash-logo)"/></svg>` : "";
   const html = `<!doctype html>
-    <html lang="de">
+    <html lang="de" data-theme="${appearance.theme}">
       <head>
         <meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
         <style>
+          ${appearance.css}
           * { box-sizing: border-box; }
           html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
           body {
-            color: #e8f0f2;
-            background: #06100f;
+            color: var(--text, #eceff4);
+            background: var(--panel-00, #262b35);
             font-family: "Segoe UI", Arial, sans-serif;
             user-select: none;
           }
@@ -525,8 +540,8 @@ function createStartupSplash() {
             grid-template-columns: 1fr 258px;
             grid-template-rows: 1fr auto;
             overflow: hidden;
-            border: 1px solid #1d3a34;
-            background: #06100f;
+            border: 1px solid var(--border, #4c566a);
+            background: var(--panel-00, #262b35);
           }
           .card { display: grid; align-content: space-between; padding: 42px 38px 34px; }
           h1 {
@@ -541,26 +556,26 @@ function createStartupSplash() {
             animation: rise .4s cubic-bezier(.2,.9,.3,1) both;
           }
           h1 em { display: block; font-style: normal; font-weight: 600; }
-          h1 span { display: block; color: #8fd96a; font-size: 30px; font-weight: 300; }
+          h1 span { display: block; color: var(--accent); font-size: 30px; font-weight: 300; }
           .maker { display: flex; align-items: center; gap: 10px; animation: rise .4s cubic-bezier(.2,.9,.3,1) both; }
           .maker img { width: 28px; height: 28px; object-fit: contain; }
           .maker b { font-size: 13px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; }
           /* The name is set in caps, the category is not: uppercasing it too
              turned "IDEs" into "IDES", which reads as a different word. */
-          .maker b i { color: #8fd96a; font-style: normal; text-transform: none; }
-          .art { position: relative; overflow: hidden; background: ${ARTWORK_GROUND}; }
+          .maker b i { color: var(--accent); font-style: normal; text-transform: none; }
+          .art { position: relative; overflow: hidden; background: var(--panel-00); }
           /* Bands of colour that run off every edge, the way cover art does.
              Drawn from gradients, so the splash waits for no image to load, and
              written down once in brand-artwork.cjs: the installer's panel is
              built from the same numbers rather than a copy of them. */
-${artworkCss(".art", "drift")}
-          .loading { grid-column: 1 / -1; background: #06100f; }
-          .track { position: relative; height: 3px; overflow: hidden; background: #10241f; }
+${artworkCss(".art", "drift", true)}
+          .loading { grid-column: 1 / -1; background: var(--panel-00); }
+          .track { position: relative; height: 3px; overflow: hidden; background: var(--panel-05); }
           /* A real measure rather than a sweep: the splash now knows how much
              of the preload is done, and a bar that only slides says nothing. */
           .track b {
             position: absolute; inset: 0 auto 0 0; display: block; width: 0;
-            background: linear-gradient(90deg, #3f9e2a, #71cc3e 60%, #d6f36e);
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent) 60%, var(--accent-bright));
             transition: width .4s cubic-bezier(.4,0,.2,1);
           }
           .track b::after {
@@ -571,9 +586,9 @@ ${artworkCss(".art", "drift")}
           .caption {
             display: flex; justify-content: space-between;
             padding: 10px 38px 12px;
-            color: #6d8781; font-size: 11px;
+            color: var(--text-faint); font-size: 11px;
           }
-          .caption strong { color: #9ab3ad; font-weight: 600; }
+          .caption strong { color: var(--text-muted); font-weight: 600; }
           @keyframes drift { ${ARTWORK_DRIFT} }
           @keyframes shimmer { 50% { opacity: .35; } }
           @keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
@@ -2316,8 +2331,8 @@ function registerIpc() {
     stageAll: Boolean(payload.stageAll),
     amend: Boolean(payload.amend),
   }));
-  ipcMain.handle("dependencies:search", (_event, payload) => dependencies.search(payload.query, payload.limit));
-  ipcMain.handle("dependencies:versions", (_event, payload) => dependencies.versions(payload.groupId, payload.artifactId));
+  ipcMain.handle("dependencies:search", (_event, payload) => dependencies.search(payload.query, payload.limit, payload.sourceId));
+  ipcMain.handle("dependencies:versions", (_event, payload) => dependencies.versions(payload.groupId, payload.artifactId, 40, payload.sourceId));
   ipcMain.handle("dependencies:list", (_event, root) => dependencies.list(root));
   ipcMain.handle("dependencies:add", (_event, payload) => dependencies.add(payload.root, payload.coordinates, payload.scope, payload.options));
   ipcMain.handle("dependencies:remove", (_event, payload) => dependencies.remove(payload.root, payload.selector));

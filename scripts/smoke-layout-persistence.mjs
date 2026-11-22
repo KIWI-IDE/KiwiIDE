@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
  */
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const startupOnly = process.argv.includes("--startup-only");
+const themeOnly = process.argv.includes("--theme-only");
 const packagedExecutable = process.env.KIWI_SMOKE_EXECUTABLE;
 const packaged = Boolean(packagedExecutable) || process.argv.includes("--packaged");
 const require = createRequire(import.meta.url);
@@ -113,7 +114,7 @@ async function withKiwi(userData, run) {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
       KIWI_LOAD_DIST: "1",
-      KIWI_SPLASH_MINIMUM_MS: "300",
+      KIWI_SPLASH_MINIMUM_MS: themeOnly ? "3000" : "300",
     KIWI_STARTUP_PRELOAD: "0",
     },
   });
@@ -124,7 +125,7 @@ async function withKiwi(userData, run) {
   const openWindow = async (kind, timeout = 40_000, excludedId = "") => {
     const target = await waitFor(
       async () => (await targets()).find((item) => item.type === "page"
-        && item.url.includes(`window=${kind}`)
+        && (kind === "splash" ? item.url.startsWith("data:text/html") : item.url.includes(`window=${kind}`))
         && item.id !== excludedId),
       timeout,
       `${kind}-Fenster`,
@@ -132,7 +133,7 @@ async function withKiwi(userData, run) {
     const cdp = await connect(target.webSocketDebuggerUrl);
     await cdp.send("Runtime.enable");
     await waitFor(
-      () => cdp.send("Runtime.evaluate", { expression: "document.readyState === 'complete' && Boolean(window.kiwi)", returnByValue: true })
+      () => cdp.send("Runtime.evaluate", { expression: `document.readyState === 'complete' && ${kind === "splash" ? "true" : "Boolean(window.kiwi)"}`, returnByValue: true })
         .then((result) => result?.result?.value),
       30_000,
       `${kind}-Preload`,
@@ -224,13 +225,134 @@ try {
     return true;
   })()`;
 
-  if (startupOnly) {
+  if (themeOnly) {
+    await verifyThemes(userData, alpha, arrangement);
+  } else if (startupOnly) {
     await verifyStartup(userData, alpha, arrangement);
   } else {
     await verifyLayout(userData, alpha, beta, arrangement);
   }
 } finally {
   await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+}
+
+async function verifyThemes(userData, project, arrangement) {
+  const verifySplash = async (openWindow, theme, accent, scheme) => {
+    const splash = await openWindow("splash");
+    try {
+      const actual = await splash.evaluate(`({
+        theme: document.documentElement.dataset.theme,
+        accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+        scheme: getComputedStyle(document.documentElement).colorScheme,
+        background: getComputedStyle(document.body).backgroundColor,
+      })`);
+      assert.equal(actual.theme, theme);
+      assert.equal(actual.accent, accent);
+      assert.equal(actual.scheme, scheme);
+      assert.notEqual(actual.background, 'rgba(0, 0, 0, 0)');
+    } finally { splash.cdp.close(); }
+  };
+  await withKiwi(userData, async ({ openWindow }) => {
+    await verifySplash(openWindow, "kiwi-nord", "#88c0d0", "dark");
+    const welcome = await openWindow("welcome");
+    const initial = await welcome.evaluate("window.kiwi.settings.get()", true);
+    assert.equal(initial.theme, "kiwi-nord");
+    assert.equal(initial.accentColor, "#88c0d0");
+    await welcome.evaluate(arrangement(project), true);
+    welcome.cdp.close();
+    const editor = await openWindow("editor");
+    const windows = [editor];
+    try {
+      const root = JSON.stringify(project);
+      for (const [kind, command] of [
+        ["settings", `window.kiwi.app.openSettings(${root})`],
+        ["structure", `window.kiwi.app.openStructure(${root})`],
+        ["wizard", `window.kiwi.app.openNewProject()`],
+        ["terminal", `window.kiwi.terminal.openWindow(${root}, "theme-smoke")`],
+        ["panel", `window.kiwi.panel.openWindow(${root})`],
+      ]) {
+        await editor.evaluate(command, true);
+        windows.push(await openWindow(kind));
+      }
+      const readAppearance = `(() => {
+        const root = document.documentElement;
+        const style = getComputedStyle(root);
+        const title = document.querySelector('.titlebar');
+        const flood = document.querySelector('.kiwi-logo-accent');
+        const button = document.createElement('button');
+        button.className = 'primary-button'; document.body.append(button);
+        const primary = getComputedStyle(button).backgroundColor; button.remove();
+        return {
+          theme: root.dataset.theme,
+          accent: style.getPropertyValue('--accent').trim(),
+          roundness: style.getPropertyValue('--roundness').trim(),
+          scheme: style.colorScheme,
+          background: getComputedStyle(document.body).backgroundColor,
+          line: title && getComputedStyle(title, '::after').backgroundImage,
+          band: title && getComputedStyle(title, '::before').backgroundImage,
+          logo: flood && getComputedStyle(flood).floodColor,
+          primary,
+        };
+      })()`;
+      for (const [theme, accent, scheme] of [
+        ["kiwi-nord", "#3388ee", "dark"],
+        ["kiwi-light", "#dd2266", "light"],
+        ["kiwi-nord", "#88c0d0", "dark"],
+      ]) {
+        await editor.evaluate(`window.kiwi.settings.update(${JSON.stringify({ theme, uiRoundness: 140, themeTint: 8 })})`, true);
+        await windows[1].evaluate(`(() => {
+          [...document.querySelectorAll('.settings-categories button')].find(button => button.textContent.trim() === 'Darstellung')?.click();
+          return true;
+        })()`);
+        await waitFor(() => windows[1].evaluate("[...document.querySelectorAll('.setting-row')].some(row => row.querySelector('strong')?.textContent === 'Akzentfarbe')"), 10_000, "accent setting");
+        await windows[1].evaluate(`(() => {
+          const row = [...document.querySelectorAll('.setting-row')].find(row => row.querySelector('strong')?.textContent === 'Akzentfarbe');
+          const input = row.querySelector('input[type=color]');
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(accent)});
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          row.scrollIntoView({ block: 'center' });
+          return true;
+        })()`);
+        await waitFor(() => windows[1].evaluate("Boolean(document.querySelector('.settings-apply-bar .primary-button:not(:disabled)'))"), 10_000, "pending accent change");
+        await windows[1].evaluate("document.querySelector('.settings-apply-bar .primary-button').click(); true");
+        await waitFor(() => editor.evaluate(`window.kiwi.settings.get().then(settings => settings.accentColor === ${JSON.stringify(accent)})`, true), 10_000, "saved accent color");
+        const expected = await waitFor(async () => {
+          const value = await editor.evaluate(readAppearance);
+          return value.theme === theme && value.accent === accent && value.logo && value.roundness === '1.4' ? value : null;
+        }, 15_000, "editor appearance after saving");
+        for (const [index, page] of windows.entries()) {
+          const actual = await waitFor(async () => {
+            const value = await page.evaluate(readAppearance);
+            return value.theme === theme && value.accent === accent && value.logo && value.roundness === '1.4' ? value : null;
+          }, 15_000, `theme in window ${index}`);
+          assert.deepEqual(actual, expected, `Window ${index} disagrees with the editor`);
+          assert.equal(actual.scheme, scheme);
+          assert.equal(actual.logo, `rgb(${[1, 3, 5].map(offset => parseInt(accent.slice(offset, offset + 2), 16)).join(', ')})`);
+          assert.notEqual(actual.line, 'none');
+        }
+        if (process.env.KIWI_THEME_SCREENSHOT_DIR && theme === "kiwi-nord" && accent === "#3388ee") {
+          await fs.mkdir(process.env.KIWI_THEME_SCREENSHOT_DIR, { recursive: true });
+          for (const [name, page] of [["editor", editor], ["settings", windows[1]]]) {
+            const screenshot = await page.cdp.send("Page.captureScreenshot", { format: "png" });
+            await fs.writeFile(path.join(process.env.KIWI_THEME_SCREENSHOT_DIR, `${name}.png`), Buffer.from(screenshot.data, "base64"));
+          }
+        }
+      }
+      await editor.evaluate("window.kiwi.settings.update({theme: 'kiwi-light', accentColor: '#dd2266'})", true);
+    } finally {
+      // Close auxiliary windows before closing the workbench.
+      for (const page of windows.slice(1)) {
+        await page.evaluate("setTimeout(() => window.kiwi.app.close(), 50); true").catch(() => undefined);
+        page.cdp.close();
+      }
+      editor.cdp.close();
+    }
+  });
+  await withKiwi(userData, async ({ openWindow }) => {
+    await verifySplash(openWindow, "kiwi-light", "#dd2266", "light");
+  });
+  console.log("Kiwi Nord default, saved startup appearance and live theme/accent/logo synchronization passed in all six window types.");
 }
 
 async function verifyStartup(userData, project, arrangement) {

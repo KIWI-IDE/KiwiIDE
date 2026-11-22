@@ -8,7 +8,7 @@
  */
 import type * as Monaco from "monaco-editor";
 import { javaKeywordScope, javaKeywords } from "./language/java-keywords";
-import { monacoThemeId, resolveTokenColors, resolveWorkbenchColors, themes } from "./themes";
+import { accentPalette, monacoThemeId, resolveTokenColors, resolveWorkbenchColors, themes } from "./themes";
 import { translucent } from "./utils";
 
 export function defineMonacoThemes(
@@ -17,11 +17,13 @@ export function defineMonacoThemes(
   tokenOverrides: Record<string, string> = {},
   colorScheme = "theme",
   surfaceOverrides: Record<string, string> = {},
+  accentColor = "",
 ) {
   const clear = wallpaper ? "#00000000" : undefined;
   for (const theme of themes) {
     const token = resolveTokenColors(theme, tokenOverrides, colorScheme);
     const surface = resolveWorkbenchColors(theme, surfaceOverrides);
+    const accent = accentPalette(accentColor || theme.editor.cursor);
     const picked = (id: keyof typeof surface, fallback: string) => surfaceOverrides[id] ? `#${surface[id]}` : fallback;
     monaco.editor.defineTheme(monacoThemeId(theme.id), {
       base: theme.base,
@@ -87,6 +89,14 @@ export function defineMonacoThemes(
         { token: "modifier", foreground: token.modifier, fontStyle: "bold" },
       ],
       colors: {
+        "focusBorder": accent["--accent"],
+        "button.background": accent["--accent"],
+        "button.foreground": accent["--accent-on"],
+        "button.hoverBackground": `${accent["--accent"]}cc`,
+        "inputOption.activeBorder": accent["--accent"],
+        "inputOption.activeBackground": `${accent["--accent"]}30`,
+        "list.focusOutline": accent["--accent"],
+        "progressBar.background": accent["--accent"],
         "editor.background": clear ?? picked("editorBackground", theme.editor.background),
         "editor.foreground": picked("editorForeground", theme.editor.foreground),
         "editorGutter.background": clear ?? picked("editorBackground", theme.editor.background),

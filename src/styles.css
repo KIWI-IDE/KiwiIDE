@@ -152,10 +152,23 @@
   --warn-surface: color-mix(in srgb, var(--amber) 18%, var(--panel-00));
   --warn-surface-soft: color-mix(in srgb, var(--amber) 10%, var(--panel-00));
 
-  /* Explorer selection keeps its own blue so it stays distinct from the
-     accent-tinted active states. */
-  --selection-surface: color-mix(in srgb, var(--blue) 30%, var(--panel-00));
-  --selection-surface-strong: color-mix(in srgb, var(--blue) 42%, var(--panel-00));
+  --selection-accent: var(--accent);
+  --selection-surface: color-mix(in srgb, var(--selection-accent) 30%, var(--panel-00));
+  --selection-surface-strong: color-mix(in srgb, var(--selection-accent) 42%, var(--panel-00));
+
+  /* Shared names used by the language, package, database and preview panels. */
+  --accent-color: var(--accent);
+  --background: var(--panel-00);
+  --bg-editor: var(--panel-00);
+  --bg-secondary: var(--panel-02);
+  --bg-input: var(--panel-02);
+  --input-background: var(--panel-02);
+  --bg-button: var(--chrome-04);
+  --bg-selected: var(--accent-surface-3);
+  --border-color: var(--border);
+  --border-input: var(--border);
+  --text-main: var(--text);
+  --muted: var(--text-muted);
 }
 
 /* Java hierarchy and Find Usages share one compact, keyboard-friendly tree. */
@@ -897,6 +910,25 @@ button {
   color:inherit;
 }
 
+/* Native form defaults otherwise leave gray fields in themed dialogs. */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea, button) {
+  border: 1px solid var(--border);
+  border-radius: calc(4px * var(--roundness, 1));
+  background: var(--panel-02);
+  color: var(--text);
+}
+
+:where(input, progress) {
+  accent-color: var(--accent);
+}
+
+input::file-selector-button {
+  border: 1px solid var(--border);
+  border-radius: calc(4px * var(--roundness, 1));
+  background: var(--panel-04);
+  color: var(--text);
+}
+
 button:focus-visible,
 input:focus-visible {
   outline:1px solid var(--green);
@@ -1479,7 +1511,7 @@ kbd {
   background:var(--chrome-06);
 }
 
-/* Green on the edge it is pressed from, so an action button reads as one of
+/* Accent on the edge it is pressed from, so an action button reads as one of
    Kiwi's rather than as a panel that happens to be clickable. */
 .settings-sdk-add {
   position: relative;
@@ -1490,7 +1522,7 @@ kbd {
   position: absolute;
   inset: 0 auto 0 0;
   width: 2px;
-  background: linear-gradient(180deg, #d6f36e, #71cc3e 55%, #3f9e2a);
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent) 55%, var(--accent-dim));
   content: "";
 }
 
@@ -2598,7 +2630,7 @@ kbd {
   position: absolute;
   inset: -1px 0 auto;
   height: 2px;
-  background: linear-gradient(90deg, #3f9e2a, #71cc3e 60%, #d6f36e);
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent) 60%, var(--accent-bright));
   content: "";
   pointer-events: none;
 }
@@ -3201,7 +3233,7 @@ kbd {
   border:1px solid var(--chrome-08);
   border-left:2px solid var(--accent);
   border-radius:calc(6px * var(--roundness, 1));
-  background:#1c211aee;
+  background:color-mix(in srgb, var(--panel-03) 94%, transparent);
   box-shadow:0 8px 28px #0009;
   color:var(--chrome-19);
   font-size: 11.5px;
@@ -3575,9 +3607,9 @@ kbd {
 }
 
 .right-rail > button.active {
-  border-right-color:var(--purple);
+  border-right-color:var(--accent);
   background:var(--panel-05);
-  color:#d2bbfb;
+  color:var(--accent-bright);
 }
 
 .right-tool-window {
@@ -5231,6 +5263,10 @@ textarea {
   object-fit: contain;
 }
 
+.kiwi-logo-accent {
+  flood-color: var(--accent);
+}
+
 .main-toolbar {
   background:var(--panel-02);
   border-color:var(--border);
@@ -5605,8 +5641,8 @@ textarea {
   inset: 0 0 0 auto;
   width: min(46%, 360px);
   background:
-    radial-gradient(120% 190% at 118% 4%, color-mix(in srgb, #86e455 34%, transparent) 0%, transparent 62%),
-    radial-gradient(130% 200% at 88% 124%, color-mix(in srgb, #12967f 30%, transparent) 0%, transparent 66%);
+    radial-gradient(120% 190% at 118% 4%, color-mix(in srgb, var(--accent-bright) 34%, transparent) 0%, transparent 62%),
+    radial-gradient(130% 200% at 88% 124%, color-mix(in srgb, var(--accent-dim) 30%, transparent) 0%, transparent 66%);
   content: "";
   pointer-events: none;
 }
@@ -5626,7 +5662,7 @@ textarea {
   position: absolute;
   inset: auto 0 -1px;
   height: 2px;
-  background: linear-gradient(90deg, #3f9e2a, #71cc3e 60%, #d6f36e);
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent) 60%, var(--accent-bright));
   content: "";
   pointer-events: none;
 }
@@ -6136,10 +6172,7 @@ textarea {
   min-width: 190px;
 }
 
-/* The Project Hub wears the splash screen's clothes — the same stacked
-   lockup, the same bands of colour running off the edges, the same rule
-   across the foot. The artwork is fixed the way cover art is; the text and
-   panels stay on theme variables, so a light theme still reads. */
+/* The hub's artwork follows the accent along with the panels and controls. */
 .project-hub {
   --hub-pad-x: clamp(34px, 7vw, 110px);
   position: relative;
@@ -6178,20 +6211,20 @@ textarea {
 
 .hub-art .one {
   inset: -52% -90% 34% -60%;
-  background: linear-gradient(158deg, #f2fa7a 0%, #86e455 40%, #23bd77 100%);
+  background: linear-gradient(158deg, var(--accent-bright) 0%, var(--accent) 40%, var(--accent-dim) 100%);
   animation: hub-drift 15s ease-in-out infinite;
 }
 
 .hub-art .two {
   inset: 26% -104% -54% -22%;
-  background: linear-gradient(196deg, #37cf8a 0%, #12967f 52%, #0a4a68 100%);
+  background: linear-gradient(196deg, var(--accent) 0%, var(--accent-dim) 52%, var(--panel-00) 100%);
   animation: hub-drift 19s ease-in-out infinite reverse;
 }
 
 .hub-art .three {
   inset: 58% -46% -62% -70%;
   border-radius: 58% 42% 62% 38% / 42% 58% 40% 60%;
-  background: linear-gradient(20deg, #0b3f5c 0%, #1d7f86 70%, #3fbf8e 100%);
+  background: linear-gradient(20deg, var(--panel-00) 0%, var(--accent-dim) 70%, var(--accent) 100%);
   opacity: .9;
   animation: hub-drift 24s ease-in-out infinite;
 }
@@ -6521,7 +6554,7 @@ textarea {
   position: absolute;
   inset: 0;
   display: block;
-  background: linear-gradient(90deg, #3f9e2a, #71cc3e 60%, #d6f36e);
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent) 60%, var(--accent-bright));
 }
 
 .hub-caption {
@@ -7198,7 +7231,7 @@ textarea {
 .tree-row:hover { background:var(--panel-05); }
 .tree-row.selected { background: transparent; color:var(--panel-22); }
 .tree-row.selected .tree-label { background:var(--selection-surface); }
-.tree-row:focus-visible { outline:1px solid var(--blue); outline-offset:-1px; }
+.tree-row:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
 .tree-chevron { color:var(--panel-13); }
 .folder-icon { color:#d2ae67; fill:#d2ae6720; }
 .java-glyph { border-color:#4f8aa0; background:#173541; color:#8dd5ee; }
@@ -10333,6 +10366,23 @@ button.file-health-item:hover { background: var(--panel-05); }
   color: var(--text-faint);
 }
 
+.dependency-source-picker {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dependency-source-picker select {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 7px;
+}
+
 .dependency-results {
   flex: 1 1 auto;
   min-height: 0;
@@ -10586,7 +10636,7 @@ button.file-health-item:hover { background: var(--panel-05); }
 .dependency-editor-coordinate > div { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
 .dependency-editor-coordinate > div span { padding: 1px 4px; border-radius: calc(3px * var(--roundness, 1)); background: var(--panel-07); color: var(--panel-13); font-size: 8px; }
 .dependency-editor-coordinate > div .managed { color: #d7b56d; background: rgba(188, 136, 41, .13); }
-.dependency-editor-coordinate > div .catalog { color: var(--accent-bright); background: rgba(60, 156, 103, .13); }
+.dependency-editor-coordinate > div .catalog { color: var(--accent-bright); background: color-mix(in srgb, var(--accent) 13%, transparent); }
 .dependency-editor-version { display: flex; align-items: center; gap: 3px; }
 .dependency-editor-version input { width: 105px; height: 25px; box-sizing: border-box; border: 1px solid var(--panel-09); border-radius: calc(4px * var(--roundness, 1)); background: var(--panel-02); color: var(--text); padding: 0 6px; font: inherit; font-size: 9px; }
 .dependency-editor-version input:focus { border-color: var(--accent); outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }

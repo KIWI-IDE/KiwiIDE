@@ -96,7 +96,7 @@ describe("Kiwi's artwork", () => {
     for (const shape of ARTWORK_SHAPES) {
       const body = ruleBody(`.hub-art .${shape.name}`);
       expect(body, `${shape.name}: inset`).toContain(`inset: ${shape.inset.map((value: number) => `${value}%`).join(" ")};`);
-      expect(body, `${shape.name}: Verlauf`).toContain(`background: ${gradientRule(shape)};`);
+      expect(body, `${shape.name}: Verlauf`).toContain(`background: ${gradientRule(shape, true)};`);
       expect(body, `${shape.name}: Drift`).toContain(
         `animation: hub-drift ${shape.drift.seconds}s ease-in-out infinite${shape.drift.reverse ? " reverse" : ""};`,
       );
@@ -132,7 +132,7 @@ describe("Kiwi's artwork", () => {
      */
     const splash = fs.readFileSync(path.join(process.cwd(), "electron", "main.cjs"), "utf8");
     const installer = fs.readFileSync(path.join(process.cwd(), "scripts", "build-installer-art.mjs"), "utf8");
-    expect(splash).toContain('artworkCss(".art", "drift")');
+    expect(splash).toContain('artworkCss(".art", "drift", true)');
     expect(installer).toContain("ARTWORK_SHAPES");
 
     for (const source of [splash, installer]) {

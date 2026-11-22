@@ -860,7 +860,7 @@ export function workbenchColorVariables(overrides: Record<string, string> = {}):
     chromeForeground: "--chrome-fg-source",
     panelBackground: "--panel-base-source",
     panelForeground: "--panel-fg-source",
-    selection: "--blue",
+    selection: "--selection-accent",
     warning: "--amber",
     danger: "--red",
     emphasis: "--emphasis",
@@ -937,10 +937,10 @@ export function resolveTokenColors(
   return resolved;
 }
 
-export const defaultThemeId = "kiwi-new-dark";
+export const defaultThemeId = "kiwi-nord";
 
 export function findTheme(id: string): KiwiTheme {
-  return themes.find((theme) => theme.id === id) || themes[0];
+  return themes.find((theme) => theme.id === id) || themes.find((theme) => theme.id === defaultThemeId)!;
 }
 
 /** Monaco theme id for a workbench theme. Every theme gets its own definition. */
@@ -960,7 +960,7 @@ export function monacoThemeId(id: string): string {
  */
 export function accentPalette(color: string): Record<string, string> {
   const hex = /^#?([0-9a-f]{6})$/i.exec(color.trim())?.[1];
-  const accent = hex ? `#${hex.toLowerCase()}` : "#7ad83b";
+  const accent = hex ? `#${hex.toLowerCase()}` : "#88c0d0";
   const channel = (offset: number) => Number.parseInt(accent.slice(1 + offset, 3 + offset), 16) / 255;
   // Rec. 709 luminance: green carries most of the perceived brightness, so a
   // yellow accent needs dark text where a blue one of the same value does not.
@@ -972,10 +972,7 @@ export function accentPalette(color: string): Record<string, string> {
     "--accent-bright": bright,
     "--accent-dim": dim,
     "--accent-on": luminance > 0.55 ? "#0b1408" : "#f4fbef",
-    // The stylesheet derives these from --accent at the root, where they are
-    // already computed by the time the workbench sets its own accent further
-    // down. Inheriting a resolved value cannot be undone, so the aliases are
-    // written out too instead of being left pointing at the theme's colour.
+    // Keep the older token names synchronized with the same accent family.
     "--green": accent,
     "--green-bright": bright,
     "--green-dim": dim,

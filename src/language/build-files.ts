@@ -238,7 +238,7 @@ export function mavenCompletions(text: string, offset: number): BuildSuggestion[
  * Counts braces and remembers the identifier that opened each one, which is all
  * that is needed to tell `dependencies { }` from `repositories { }`.
  */
-export function gradleBlockPath(text: string, offset: number): string[] {
+function gradleContext(text: string, offset: number): { path: string[]; code: boolean } {
   const before = text.slice(0, offset);
   const stack: string[] = [];
   let index = 0;
@@ -247,20 +247,44 @@ export function gradleBlockPath(text: string, offset: number): string[] {
     const character = before[index];
     if (character === "\"" || character === "'") {
       const quote = character;
+      if (before.slice(index, index + 3) === quote.repeat(3)) {
+        const end = before.indexOf(quote.repeat(3), index + 3);
+        if (end < 0) return { path: stack.filter(Boolean), code: false };
+        index = end + 3;
+        continue;
+      }
       index += 1;
       while (index < before.length && before[index] !== quote) {
         if (before[index] === "\\") index += 1;
         index += 1;
       }
+      if (index >= before.length) return { path: stack.filter(Boolean), code: false };
       index += 1;
       continue;
     }
     if (character === "/" && before[index + 1] === "/") {
       while (index < before.length && before[index] !== "\n") index += 1;
+      if (index >= before.length) return { path: stack.filter(Boolean), code: false };
+      continue;
+    }
+    if (character === "/" && before[index + 1] === "*") {
+      let depth = 1;
+      index += 2;
+      while (index < before.length && depth) {
+        if (before.slice(index, index + 2) === "/*") { depth += 1; index += 2; }
+        else if (before.slice(index, index + 2) === "*/") { depth -= 1; index += 2; }
+        else index += 1;
+      }
+      if (depth) return { path: stack.filter(Boolean), code: false };
       continue;
     }
     if (character === "{") {
-      stack.push(lastName);
+      const line = before.slice(before.lastIndexOf("\n", index - 1) + 1, index);
+      const typed = /(?:withType|configure|named|register)\s*<\s*([A-Za-z_][\w.]*)\s*>[^{}]*$/.exec(line);
+      const applied = /\bas\s+([A-Za-z_]\w*)\s*\)\s*\.apply\s*$/.exec(line);
+      const invocation = /\b([A-Za-z_]\w*)\s*\([^{}]*\)\s*$/.exec(line);
+      const dependency = invocation && GRADLE_CONFIGURATIONS.has(invocation[1]) ? invocation[1] : "";
+      stack.push(typed?.[1] || applied?.[1] || dependency || lastName);
       lastName = "";
       index += 1;
       continue;
@@ -280,14 +304,70 @@ export function gradleBlockPath(text: string, offset: number): string[] {
     if (character === "\n") lastName = "";
     index += 1;
   }
-  return stack.filter(Boolean);
+  return { path: stack.filter(Boolean), code: true };
 }
+
+export function gradleBlockPath(text: string, offset: number): string[] {
+  return gradleContext(text, offset).path;
+}
+
+/** The complete accessor is replaced, including text beyond the caret. */
+export function gradleCatalogQueryAt(text: string, offset: number): { catalog: string; accessor: string; start: number; end: number } | null {
+  if (!gradleContext(text, offset).code) return null;
+  const match = /\b([A-Za-z_]\w*)((?:\.[A-Za-z0-9_]*)+)$/.exec(text.slice(0, offset));
+  if (!match) {
+    const argument = /\b([A-Za-z_]\w*)\s*\(\s*([A-Za-z0-9_]*)$/.exec(text.slice(0, offset));
+    if (!argument || !GRADLE_CONFIGURATIONS.has(argument[1])) return null;
+    const term = argument[2];
+    const rest = /^[A-Za-z0-9_.]*/.exec(text.slice(offset))?.[0] || "";
+    return { catalog: "", accessor: term, start: offset - term.length, end: offset + rest.length };
+  }
+  const rest = /^[A-Za-z0-9_.]*/.exec(text.slice(offset))?.[0] || "";
+  return { catalog: match[1], accessor: match[0], start: offset - match[0].length, end: offset + rest.length };
+}
+
+const GRADLE_MEMBERS: Record<string, Array<[string, string, boolean]>> = {
+  dependency: [
+    ["isTransitive", "isTransitive = false", false],
+    ["exclude", "exclude(group = \"${1:group}\", module = \"${2:module}\")", true],
+    ["because", "because(\"$0\")", true],
+  ],
+  JavaPluginExtension: GRADLE_BLOCKS.java,
+  JavaCompile: [
+    ["options", "options.$0", true], ["dependsOn", "dependsOn($0)", true], ["setSource", "setSource($0)", true],
+    ["sourceCompatibility", "sourceCompatibility = \"$0\"", true], ["targetCompatibility", "targetCompatibility = \"$0\"", true],
+  ],
+  JavaCompileOptions: [
+    ["encoding", "encoding = \"UTF-8\"", false], ["release", "release.set($0)", true],
+    ["compilerArgs", "compilerArgs.add(\"$0\")", true], ["isFork", "isFork = true", false],
+  ],
+  Javadoc: [["options", "options", false], ["source", "source($0)", true], ["classpath", "classpath", false]],
+  SourceSetContainer: [["named", "named(\"${1:main}\") {\n    $0\n}", true]],
+  StandardJavadocDocletOptions: [["encoding", "encoding = \"UTF-8\"", false], ["addStringOption", "addStringOption(\"${1:option}\", \"${2:value}\")", true]],
+  tasks: [["withType", "withType<${1:JavaCompile}>().configureEach {\n    $0\n}", true], ["named", "named<${1:JavaCompile}>(\"${2:compileJava}\") {\n    $0\n}", true], ["register", "register<${1:Sync}>(\"${2:taskName}\") {\n    $0\n}", true], ["test", "test {\n    useJUnitPlatform()$0\n}", true], ["processResources", "processResources {\n    $0\n}", true]],
+  extensions: [["configure", "configure<${1:JavaPluginExtension}> {\n    $0\n}", true]],
+  layout: [["projectDirectory", "projectDirectory", false], ["buildDirectory", "buildDirectory", false]],
+  inputs: [["properties", "properties($0)", true], ["property", "property(\"${1:name}\", ${2:value})", true]],
+  toolchain: [["languageVersion", "languageVersion.set(JavaLanguageVersion.of($0))", true], ["vendor", "vendor", false]],
+  Sync: [["from", "from($0)", true], ["into", "into($0)", true], ["inputs", "inputs.$0", true], ["filter", "filter<${1:ReplaceTokens}>(\"tokens\" to ${2:tokens})", true]],
+  test: [["useJUnitPlatform", "useJUnitPlatform()", false]],
+  processResources: [["inputs", "inputs.$0", true], ["filesMatching", "filesMatching(listOf(\"${1:**/*.yml}\")) {\n    $0\n}", true]],
+  credentials: [["username", "username = System.getenv(\"$0\")", true], ["password", "password = System.getenv(\"$0\")", true]],
+  maven: [["name", "name = \"$0\"", true], ["url", "url = uri(\"$0\")", true], ["credentials", "credentials {\n    $0\n}", true]],
+};
 
 /** Suggestions for a Gradle build script at the caret. */
 export function gradleCompletions(text: string, offset: number): BuildSuggestion[] {
-  const path = gradleBlockPath(text, offset);
+  const context = gradleContext(text, offset);
+  if (!context.code) return [];
+  const path = context.path;
   const block = path[path.length - 1] || "";
-  const entries = GRADLE_BLOCKS[block] || (path.length ? [] : GRADLE_BLOCKS[""]);
+  const line = text.slice(text.lastIndexOf("\n", offset - 1) + 1, offset);
+  const options = /\boptions\.[A-Za-z_]*$/.test(line) && (path.includes("JavaCompile") || path.includes("compileJava"));
+  const receiver = /\b(tasks|extensions|layout|inputs|toolchain)\.[A-Za-z_]*$/.exec(line)?.[1];
+  const entries = receiver ? GRADLE_MEMBERS[receiver] : options ? GRADLE_MEMBERS.JavaCompileOptions
+    : GRADLE_CONFIGURATIONS.has(block) ? GRADLE_MEMBERS.dependency
+    : GRADLE_MEMBERS[block] || GRADLE_MEMBERS[block.split(".").at(-1) || ""] || GRADLE_BLOCKS[block] || (path.length ? [] : GRADLE_BLOCKS[""]);
   return entries.map(([label, insertText, snippet]) => ({
     label,
     insertText,

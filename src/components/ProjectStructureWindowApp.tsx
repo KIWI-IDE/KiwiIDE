@@ -9,7 +9,6 @@ import type {
   ProjectSettings,
   ProjectTask,
 } from "../types";
-import { findTheme } from "../themes";
 import { projectStructureProblems } from "../structure/project-structure";
 import {
   StandaloneDocumentHeader,
@@ -57,11 +56,6 @@ export function ProjectStructureWindowApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", findTheme(settings?.theme || "").id);
-    document.documentElement.style.setProperty("--roundness", String(Math.max(0, Math.min(250, settings?.uiRoundness ?? 100)) / 100));
-  }, [settings?.theme]);
 
   const load = useCallback(async (root: string) => {
     const rootChanged = !requests.current.matchesRoot(root);

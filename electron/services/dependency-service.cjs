@@ -8,7 +8,8 @@ const {
   topLevelBlockBody,
 } = require("./source-text.cjs");
 
-const SEARCH_HOST = "https://search.maven.org";
+const { DependencySources, repositoryById, sourceForGroup } = require("./dependency-sources.cjs");
+const { gradleRepository, mavenRepository } = require("./dependency-repository-writer.cjs");
 const MAVEN_SCOPES = ["compile", "provided", "runtime", "test", "system", "import"];
 const GRADLE_CONFIGURATIONS = [
   "implementation",
@@ -619,50 +620,17 @@ class DependencyService {
     this.pathGuard = pathGuard;
     this.projects = projects;
     this.fetchImpl = fetchImpl;
+    this.sources = new DependencySources(fetchImpl, mavenSearchQuery);
     this.mutations = new Map();
   }
 
-  async search(query, limit = 25) {
-    const text = mavenSearchQuery(query);
-    if (!text) return [];
-    const url = new URL("/solrsearch/select", SEARCH_HOST);
-    url.searchParams.set("q", text);
-    // The default core lists one row per artifact and answers with its latest
-    // version. A query that names a version has to ask the core that holds
-    // every version, or it matches nothing.
-    if (text.includes("v:")) url.searchParams.set("core", "gav");
-    url.searchParams.set("rows", String(Math.min(50, Math.max(1, Number(limit) || 25))));
-    url.searchParams.set("wt", "json");
-    let response;
-    try {
-      response = await this.fetchImpl(url, { headers: { accept: "application/json" } });
-    } catch (error) {
-      throw new Error(`Maven Central ist nicht erreichbar: ${error?.message || error}`);
-    }
-    if (!response.ok) throw new Error(`Maven Central antwortete mit ${response.status}.`);
-    const payload = await response.json();
-    return (payload?.response?.docs || [])
-      .map((entry) => ({
-        groupId: String(entry.g || ""), artifactId: String(entry.a || ""),
-        version: String(entry.latestVersion || entry.v || ""), packaging: String(entry.p || "jar"),
-        updatedAt: Number(entry.timestamp) || 0,
-      }))
-      .filter((entry) => entry.groupId && entry.artifactId && entry.version);
+  async search(query, limit = 25, sourceId = "") {
+    return this.sources.search(query, limit, sourceId);
   }
 
-  async versions(groupId, artifactId, limit = 40) {
+  async versions(groupId, artifactId, limit = 40, sourceId = "") {
     const coordinates = assertCoordinates({ groupId, artifactId, version: "1" });
-    const url = new URL("/solrsearch/select", SEARCH_HOST);
-    url.searchParams.set("q", `g:"${coordinates.groupId}" AND a:"${coordinates.artifactId}"`);
-    url.searchParams.set("core", "gav");
-    url.searchParams.set("rows", String(Math.min(100, Math.max(1, Number(limit) || 40))));
-    url.searchParams.set("wt", "json");
-    let response;
-    try { response = await this.fetchImpl(url, { headers: { accept: "application/json" } }); }
-    catch (error) { throw new Error(`Maven Central ist nicht erreichbar: ${error?.message || error}`); }
-    if (!response.ok) throw new Error(`Maven Central antwortete mit ${response.status}.`);
-    const payload = await response.json();
-    return [...new Set((payload?.response?.docs || []).map((entry) => String(entry.v || "")).filter(Boolean))];
+    return this.sources.versions(coordinates.groupId, coordinates.artifactId, limit, sourceId);
   }
 
   async collect(root) {
@@ -729,6 +697,47 @@ class DependencyService {
     return true;
   }
 
+  async writeBatch(edits) {
+    const changed = edits.filter(edit => edit.original !== edit.updated);
+    for (const edit of changed) {
+      if (await fsp.readFile(edit.file, "utf8") !== edit.original) throw new Error("Eine Builddatei wurde zwischenzeitlich geändert. Bitte synchronisieren und erneut versuchen.");
+    }
+    const written = [];
+    try {
+      for (const edit of changed) {
+        await this.writeChecked(edit.file, edit.original, edit.updated);
+        written.push(edit);
+      }
+    } catch (error) {
+      const failed = [];
+      for (const edit of written.reverse()) {
+        try {
+          if (await fsp.readFile(edit.file, "utf8") !== edit.updated) throw new Error("changed");
+          await fsp.writeFile(edit.file, edit.original, "utf8");
+        } catch { failed.push(path.basename(edit.file)); }
+      }
+      if (failed.length) throw new Error(`${error.message} Bitte prüfe außerdem: ${failed.join(", ")}. Diese Dateien konnten nicht zurückgesetzt werden.`);
+      throw error;
+    }
+    return changed.map(edit => edit.file);
+  }
+
+  async repositoryChanges(root, type, target, repository) {
+    if (!repository) return { source: target.source, edits: [] };
+    if (type === "Maven") return { source: mavenRepository(target.source, repository), edits: [] };
+    for (const name of ["settings.gradle.kts", "settings.gradle"]) {
+      const file = path.join(root, name);
+      let original;
+      try {
+        this.pathGuard.assertAllowed(file, root);
+        original = await fsp.readFile(file, "utf8");
+      } catch (error) { if (error.code === "ENOENT") continue; throw error; }
+      if (topLevelBlockBody(original, "dependencyResolutionManagement") < 0) continue;
+      return { source: target.source, edits: [{ file, original, updated: gradleRepository(original, repository, true) }] };
+    }
+    return { source: gradleRepository(target.source, repository), edits: [] };
+  }
+
   /**
    * The build file a library is to be written into.
    *
@@ -771,47 +780,43 @@ class DependencyService {
   async add(root, coordinates, scope = "", options = {}) {
     root = this.pathGuard.assertWorkspace(root);
     const checked = assertCoordinates(coordinates);
+    const repository = options.sourceId ? repositoryById(options.sourceId) : sourceForGroup(checked.groupId);
     return this.withMutation(root, async () => {
       const model = await this.collect(root);
       const target = await this.targetBuildFile(root, model, options.buildFile);
       if (model.dependencies.some((entry) => !entry.managed && entry.buildFile === target.file && entry.coordinate === `${checked.groupId}:${checked.artifactId}`)) {
         return { file: target.file, files: [], added: false, changed: false, reason: "Die Abhängigkeit ist bereits eingetragen." };
       }
+      const repositories = await this.repositoryChanges(root, model.type, target, repository);
       if (model.type === "Maven") {
         const managed = model.dependencies.find((entry) => entry.managed && entry.coordinate === `${checked.groupId}:${checked.artifactId}`);
-        const updated = insertMavenDependency(target.source, checked, MAVEN_SCOPES.includes(scope) ? scope : "compile", { omitVersion: Boolean(managed) });
-        const changed = await this.writeChecked(target.file, target.source, updated);
-        return { file: target.file, files: changed ? [target.file] : [], added: changed, changed, managed: Boolean(managed), ...(changed ? {} : { reason: UNCHANGED_REASON }) };
+        const updated = insertMavenDependency(repositories.source, checked, MAVEN_SCOPES.includes(scope) ? scope : "compile", { omitVersion: Boolean(managed) });
+        const files = await this.writeBatch([...repositories.edits, { file: target.file, original: target.source, updated }]);
+        const changed = files.length > 0;
+        return { file: target.file, files, added: changed, changed, managed: Boolean(managed), ...(changed ? {} : { reason: UNCHANGED_REASON }) };
       }
 
       const configuration = GRADLE_CONFIGURATIONS.includes(scope) ? scope : "implementation";
       if (!options.useVersionCatalog) {
-        const updated = insertGradleDependency(target.source, checked, configuration, target.file.endsWith(".kts"));
-        const changed = await this.writeChecked(target.file, target.source, updated);
-        return { file: target.file, files: changed ? [target.file] : [], added: changed, changed, ...(changed ? {} : { reason: UNCHANGED_REASON }) };
+        const updated = insertGradleDependency(repositories.source, checked, configuration, target.file.endsWith(".kts"));
+        const files = await this.writeBatch([...repositories.edits, { file: target.file, original: target.source, updated }]);
+        const changed = files.length > 0;
+        return { file: target.file, files, added: changed, changed, ...(changed ? {} : { reason: UNCHANGED_REASON }) };
       }
 
       const alias = assertCatalogKey(options.alias || checked.artifactId, "Catalog-Alias");
       const versionKey = assertCatalogKey(options.versionKey || `${alias}-version`, "Versionsschlüssel");
       const catalog = options.catalogPath
-        ? model.catalogs.find((entry) => path.resolve(entry.path) === this.pathGuard.assertAllowed(options.catalogPath, root))
+        ? model.catalogs.find((entry) => samePath(entry.path, this.pathGuard.assertAllowed(options.catalogPath, root)))
         : model.catalogs[0];
       if (!catalog) throw new Error("Es wurde kein Gradle-Version-Catalog (libs.versions.toml) gefunden.");
       if (catalog.libraries.some((entry) => entry.alias === alias)) throw new Error(`Der Catalog-Alias '${alias}' ist bereits vergeben.`);
       let catalogUpdated = insertTomlAssignment(catalog.source, "versions", versionKey, `"${checked.version}"`);
       catalogUpdated = insertTomlAssignment(catalogUpdated, "libraries", alias, `{ module = "${checked.groupId}:${checked.artifactId}", version.ref = "${versionKey}" }`);
       const notation = `${catalog.name}.${catalogAccessor(alias)}`;
-      const buildUpdated = insertGradleDependency(target.source, checked, configuration, target.file.endsWith(".kts"), notation);
-      const catalogCurrent = await fsp.readFile(catalog.path, "utf8");
-      const buildCurrent = await fsp.readFile(target.file, "utf8");
-      if (catalogCurrent !== catalog.source || buildCurrent !== target.source) throw new Error("Eine Builddatei wurde zwischenzeitlich geändert. Bitte synchronisieren und erneut versuchen.");
-      await fsp.writeFile(catalog.path, catalogUpdated, "utf8");
-      try { await fsp.writeFile(target.file, buildUpdated, "utf8"); }
-      catch (error) {
-        await fsp.writeFile(catalog.path, catalog.source, "utf8").catch(() => undefined);
-        throw error;
-      }
-      return { file: target.file, files: [catalog.path, target.file], added: true, changed: true, catalogAlias: alias, versionKey };
+      const buildUpdated = insertGradleDependency(repositories.source, checked, configuration, target.file.endsWith(".kts"), notation);
+      const files = await this.writeBatch([...repositories.edits, { file: catalog.path, original: catalog.source, updated: catalogUpdated }, { file: target.file, original: target.source, updated: buildUpdated }]);
+      return { file: target.file, files, added: true, changed: true, catalogAlias: alias, versionKey };
     });
   }
 
@@ -893,7 +898,7 @@ class DependencyService {
 
   async updateCatalogInternal(root, model, catalogPath, key, version, alias = "") {
     const safePath = this.pathGuard.assertAllowed(catalogPath, root);
-    const catalog = model.catalogs.find((candidate) => path.resolve(candidate.path) === safePath);
+    const catalog = model.catalogs.find((candidate) => samePath(candidate.path, safePath));
     if (!catalog) throw new Error("Der Version-Catalog gehört nicht zu diesem Projekt.");
     let assignment = catalog.versions.find((entry) => entry.key === key);
     if (assignment) {
