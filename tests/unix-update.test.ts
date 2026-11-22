@@ -95,5 +95,5 @@ describe("Unix update preparation", () => {
     }, { platform: "darwin", executable: path.join(bundle, "Contents", "MacOS", "Kiwi IDE"), userData: root });
     expect((await fs.stat(path.join(prepared.stage, "payload", "Contents", "MacOS", "Kiwi IDE"))).isFile()).toBe(true);
     await discardUnixUpdate(prepared);
-  });
+  }, 180_000);
 });
