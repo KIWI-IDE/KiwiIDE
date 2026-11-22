@@ -2,6 +2,15 @@ import type { Locale } from "./i18n";
 import type { JavaMethodSignature, JavaRefactorPlan, JavaSignatureParameter, UnusedPrivateAnalysis } from "./language/java-refactor";
 
 import type { EditorFileState } from "./editor/editor-state";
+import type { EditorMacro } from "./editor/editor-macros";
+
+export interface GitHubActionRun { id: number; name: string; title: string; number: number; attempt: number; status: string; conclusion: string; branch: string; sha: string; event: string; actor: string; createdAt: string; updatedAt: string; url: string; workflowId: number }
+export interface GitHubJob { id: number; name: string; status: string; conclusion: string; startedAt: string; completedAt: string; steps: Array<{ number: number; name: string; status: string; conclusion: string }> }
+export interface GitHubActionsList { repository: string; page: number; total: number; runs: GitHubActionRun[]; workflows: Array<{ id: number; name: string; path: string; state: string }> }
+export interface GitHubActionsDetails { run: GitHubActionRun; jobs: GitHubJob[]; totalJobs: number }
+export interface StructuralMatch { id: string; file: string; relative: string; start: number; end: number; line: number; column: number; before: string; after: string }
+export interface StructuralPreview { planId: string; matches: StructuralMatch[]; scanned: number; skipped: Array<{ file: string; reason: string }>; truncated: boolean }
+export interface StructuralApplyResult { files: Array<{ file: string; content: string }>; replacements: number }
 
 export type ActivityView = "explorer" | "modules" | "search" | "structure" | "hierarchy" | "source" | "tests" | "run" | "build";
 /** A TODO/FIXME marker found anywhere in the project. */
@@ -1491,6 +1500,11 @@ export interface LanguageServerStatus {
 }
 
 export interface KiwiApi {
+  macros: {
+    list(): Promise<EditorMacro[]>;
+    save(macro: EditorMacro): Promise<EditorMacro[]>;
+    remove(id: string): Promise<EditorMacro[]>;
+  };
   polyglot: {
     status(root?: string): Promise<LanguageServerStatus[]>;
     open(payload: { root: string; file: string; text: string; languageId: string }): Promise<{ available: boolean; status: string; reason?: string; capabilities?: any }>;
@@ -1513,6 +1527,8 @@ export interface KiwiApi {
   };
   platform: string;
   workspace: {
+    structuralPreview(root: string, options: { language: string; pattern: string; replacement: string; dirtyFiles?: string[] }): Promise<StructuralPreview>;
+    structuralApply(root: string, planId: string, selectedIds: string[], dirtyFiles?: string[]): Promise<StructuralApplyResult>;
     open(): Promise<string | null>;
     register(root: string): Promise<string | null>;
     restore(): Promise<string | null>;
@@ -1812,6 +1828,10 @@ export interface KiwiApi {
     }>;
     createPullRequest(root: string, input: { title: string; body?: string; head?: string; base?: string; draft?: boolean }): Promise<GitPullRequest>;
     githubStatus(): Promise<GitHubSession>;
+    actionsList(root: string, options?: { page?: number; branch?: string; status?: string; workflowId?: number }): Promise<GitHubActionsList>;
+    actionsDetails(root: string, runId: number): Promise<GitHubActionsDetails>;
+    actionsLogs(root: string, runId: number, jobId: number): Promise<{ text: string; truncated: boolean }>;
+    actionsRerunFailed(root: string, runId: number): Promise<{ requested: boolean; id: number }>;
     githubSignIn(token: string): Promise<GitHubSession>;
     githubSignOut(): Promise<GitHubSession>;
     githubBeginDeviceFlow(): Promise<{ userCode: string; verificationUri: string; expiresIn: number; interval: number }>;

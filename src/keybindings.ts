@@ -26,6 +26,10 @@ export interface KeybindingDefinition {
 }
 
 export const keybindingCatalogue: KeybindingDefinition[] = [
+  { id: "macroRecord", label: "Macro: Start/stop recording", category: "Editor", fallback: "Ctrl+Alt+Shift+R" },
+  { id: "macroPlay", label: "Macro: Play last", category: "Editor", fallback: "Ctrl+Alt+Shift+P" },
+  { id: "macroManager", label: "Editor macros", category: "Editor", fallback: "Ctrl+Alt+Shift+M" },
+  { id: "structuralSearch", label: "Structural search", category: "Navigation", fallback: "Ctrl+Alt+Shift+F" },
   { id: "commandPalette", label: "Command Palette", category: "Navigation", fallback: "Ctrl+Shift+P" },
   { id: "searchEverywhere", label: "Überall suchen", category: "Navigation", fallback: "Ctrl+P" },
   { id: "recentFiles", label: "Zuletzt geöffnete Dateien", category: "Navigation", fallback: "Ctrl+E" },

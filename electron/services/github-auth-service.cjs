@@ -211,14 +211,14 @@ class GitHubAuthService {
   /** Authenticated GitHub API request. The token remains inside the main
    * process and error messages are scrubbed before crossing IPC. */
   async requestJson(apiPath, options = {}) {
-    if (!this.state.token) throw new Error("Melde dich zuerst bei GitHub an.");
+    if (!this.state.token && !options.public) throw new Error("Melde dich zuerst bei GitHub an.");
     const pathname = String(apiPath || "");
     if (!pathname.startsWith("/") || pathname.startsWith("//") || /[\r\n]/.test(pathname)) {
       throw new Error("Ungültiger GitHub-API-Pfad.");
     }
     const headers = {
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${this.state.token}`,
+      ...(this.state.token ? { Authorization: `Bearer ${this.state.token}` } : {}),
       "User-Agent": "Kiwi-IDE",
       "X-GitHub-Api-Version": "2022-11-28",
     };
@@ -247,6 +247,34 @@ class GitHubAuthService {
       throw new Error(message);
     }
     return payload;
+  }
+
+  /** Job logs redirect to short-lived signed storage URLs. Credentials are
+   * attached only to api.github.com and never forwarded to that storage. */
+  async requestText(apiPath, options = {}) {
+    if (!this.state.token && !options.public) throw new Error("Melde dich zuerst bei GitHub an.");
+    if (!/^\/repos\/[^/]+\/[^/]+\/actions\/jobs\/\d+\/logs$/.test(apiPath)) throw new Error("Ungültiger GitHub-Protokollpfad.");
+    const signal = AbortSignal.timeout(20_000);
+    let response = await this.fetchImpl(`https://api.github.com${apiPath}`, { redirect: "manual", signal, headers: {
+      Accept: "application/vnd.github+json", "User-Agent": "Kiwi-IDE", "X-GitHub-Api-Version": "2022-11-28",
+      ...(this.state.token ? { Authorization: `Bearer ${this.state.token}` } : {}),
+    } });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const target = new URL(response.headers.get("location"));
+      if (target.protocol !== "https:" || target.username || target.password || target.port || !/(?:^|\.)(?:blob\.core\.windows\.net|actions\.githubusercontent\.com)$/.test(target.hostname)) throw new Error("GitHub hat eine unbekannte Protokolladresse geliefert.");
+      response = await this.fetchImpl(target.href, { redirect: "error", signal });
+    }
+    if (!response.ok) throw new Error(`GitHub-Protokoll ist nicht verfügbar (HTTP ${response.status}). Prüfe die Actions-Berechtigung oder öffne den Job auf GitHub.`);
+    const chunks = []; let length = 0; let truncated = false;
+    const limit = 2_000_000;
+    if (response.body) {
+      for await (const chunk of response.body) {
+        const buffer = Buffer.from(chunk); const remaining = limit - length;
+        chunks.push(buffer.subarray(0, remaining)); length += Math.min(remaining, buffer.length);
+        if (buffer.length > remaining || length >= limit) { truncated = true; break; }
+      }
+    }
+    return { text: redactSecrets(Buffer.concat(chunks).toString("utf8")), truncated };
   }
 
   /**

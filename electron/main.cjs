@@ -3,6 +3,9 @@ const fs = require("node:fs");
 const { revealStartupWindow } = require("./services/startup-window.cjs");
 const { GradleEditorService } = require("./services/gradle-editor-service.cjs");
 const { DependencyCompatibilityService } = require("./services/dependency-compatibility.cjs");
+const { GitHubActionsService } = require("./services/github-actions-service.cjs");
+const { StructuralSearchService } = require("./services/structural-search-service.cjs");
+const { EditorMacroStore } = require("./services/editor-macro-store.cjs");
 const { prepareUnixUpdate, discardUnixUpdate } = require("./services/unix-update-service.cjs");
 const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
@@ -1095,6 +1098,9 @@ async function createServices() {
   const dependencies = new DependencyService(guard, projects);
   const gradleEditor = new GradleEditorService(guard, projects, builds, dependencies, broadcast);
   const dependencyCompatibility = new DependencyCompatibilityService(guard, projects, dependencies);
+  const githubActions = new GitHubActionsService(guard, git, githubAuth);
+  const structuralSearch = new StructuralSearchService(guard, workspace);
+  const macroStore = new EditorMacroStore(userData);
   const systemFonts = new SystemFontService();
   // An applied renderer update is the version Kiwi is actually running, so it
   // is also the version the next check compares against — otherwise the same
@@ -1148,7 +1154,7 @@ async function createServices() {
     joinSecret: settings.get().discordJoinSecret,
   });
   app.setAccessibilitySupportEnabled(Boolean(settings.get().screenReaderMode));
-  return { guard, settings, workspaceState, sessionStore, editorStates, workspace, projects, modules, runConfigurations, builds, cacheRecovery, git, githubAuth, tests, terminal, tailer, debug, breakpoints, templates, projectIndex, bytecode, language, polyglot, polyglotProjects, managedLanguageServers, javaRefactor, workflow, dependencies, gradleEditor, dependencyCompatibility, systemFonts, updates, httpClient, discord, vulnerabilities, deployments, downloadedJdkRoot };
+  return { guard, settings, workspaceState, sessionStore, editorStates, workspace, projects, modules, runConfigurations, builds, cacheRecovery, git, githubAuth, tests, terminal, tailer, debug, breakpoints, templates, projectIndex, bytecode, language, polyglot, polyglotProjects, managedLanguageServers, javaRefactor, workflow, dependencies, gradleEditor, dependencyCompatibility, githubActions, structuralSearch, macroStore, systemFonts, updates, httpClient, discord, vulnerabilities, deployments, downloadedJdkRoot };
 }
 
 /** The settings the Discord card is built from. */
@@ -1344,6 +1350,15 @@ function registerIpc() {
   ipcMain.handle("workspace:tree", (_event, root) => workspace.readTree(root));
   ipcMain.handle("workspace:children", (_event, payload) => workspace.readChildren(payload.root, payload.directory));
   ipcMain.handle("workspace:search", (_event, payload) => workspace.search(payload.root, payload.query, payload.options));
+  ipcMain.handle("workspace:structuralPreview", (_event, payload) => services.structuralSearch.preview(payload.root, payload.options));
+  ipcMain.handle("workspace:structuralApply", (_event, payload) => services.structuralSearch.apply(payload.root, payload.planId, payload.selectedIds, payload.dirtyFiles));
+  ipcMain.handle("macros:list", () => services.macroStore.list());
+  ipcMain.handle("macros:save", (_event, macro) => services.macroStore.save(macro));
+  ipcMain.handle("macros:remove", (_event, id) => services.macroStore.remove(id));
+  ipcMain.handle("github:actionsList", (_event, payload) => services.githubActions.list(payload.root, payload.options));
+  ipcMain.handle("github:actionsDetails", (_event, payload) => services.githubActions.details(payload.root, payload.runId));
+  ipcMain.handle("github:actionsLogs", (_event, payload) => services.githubActions.logs(payload.root, payload.runId, payload.jobId));
+  ipcMain.handle("github:actionsRerunFailed", (_event, payload) => services.githubActions.rerunFailed(payload.root, payload.runId));
   ipcMain.handle("workspace:taskComments", (_event, payload) => workspace.taskComments(payload.root));
   ipcMain.handle("workspace:validateProject", (_event, payload) => workspace.validateProject(payload.root));
   ipcMain.handle("workspace:validateBuffer", (_event, payload) => workspace.validateBuffer(payload.root, payload.file, payload.content));

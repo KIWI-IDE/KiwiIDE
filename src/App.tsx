@@ -13,6 +13,7 @@ import {
   ClipboardCopy,
   ClipboardPaste,
   CircleAlert,
+  Circle,
   CircleCheck,
   Info,
   CircleX,
@@ -177,6 +178,10 @@ import { javaLanguageDefinition, javaKeywords, javaKeywordScope } from "./langua
 import { HTTP_LANGUAGE_ID, installHttpLanguage } from "./language/http-language";
 import { installBuildFileCompletion } from "./language/build-completion";
 import { CompletionStatus } from "./components/CompletionStatus";
+import { MacroManager } from "./components/MacroManager";
+import { StructuralSearchView } from "./components/StructuralSearchView";
+import { GitHubActionsView } from "./git/GitHubActionsView";
+import { EditorMacroRecorder, type EditorMacro, type MacroStep } from "./editor/editor-macros";
 import type { DependencyAdviceOptions } from "./types";
 import { parseHttpFile, requestAtLine, type HttpRequestDefinition } from "./language/http-file";
 import { findCodeSyntaxProblems, type SyntaxProblem } from "./language/syntax-router";
@@ -3414,6 +3419,29 @@ function IdeApp() {
     (groupId: string, artifactId: string, options: DependencyAdviceOptions) => window.kiwi!.project.dependencyAdvice(workspaceRootRef.current, groupId, artifactId, options),
     [],
   );
+  const [editorMacros, setEditorMacros] = useState<EditorMacro[]>([]);
+  const [macroManagerOpen, setMacroManagerOpen] = useState(false);
+  const [macroDraft, setMacroDraft] = useState<MacroStep[] | null>(null);
+  const [macroState, setMacroState] = useState({ recording: false, count: 0 });
+  const lastMacro = useRef<string>("");
+  const macroRecorder = useRef<EditorMacroRecorder | null>(null);
+  if (!macroRecorder.current) macroRecorder.current = new EditorMacroRecorder((recording, count, error) => {
+    setMacroState({ recording, count }); if (error) toast(error, "info");
+  });
+  useEffect(() => { let live = true; void window.kiwi?.macros.list().then(macros => { if (live) setEditorMacros(macros); }).catch(error => toast(String(error), "error")); return () => { live = false; macroRecorder.current?.dispose(); }; }, [toast]);
+  const toggleMacroRecording = useCallback(() => {
+    try {
+      if (macroRecorder.current?.recording) {
+        const steps = macroRecorder.current.stop();
+        if (!steps.length) { toast("No editing steps were recorded.", "info"); return; }
+        setMacroDraft(steps); setMacroManagerOpen(true);
+      } else { setMacroDraft(null); setMacroManagerOpen(false); macroRecorder.current?.start(); }
+    } catch (error) { toast(String(error), "error"); }
+  }, [toast]);
+  const playEditorMacro = useCallback((macro: EditorMacro, repetitions = 1) => {
+    try { macroRecorder.current?.play(macro, repetitions); lastMacro.current = macro.id; setMacroManagerOpen(false); }
+    catch (error) { toast(String(error), "error"); }
+  }, [toast]);
   /**
    * The tabs the strip is too narrow to show, and the one being dragged.
    *
@@ -7607,6 +7635,7 @@ function IdeApp() {
   }, [editorReady]);
 
   const onEditorMount: OnMount = (editor, monaco) => {
+    macroRecorder.current?.attach(editor);
     gitHunkStagingRef.current?.dispose();
     gitHunkStagingRef.current = null;
     gitHunkModelListenerRef.current?.dispose();
@@ -8628,6 +8657,18 @@ function IdeApp() {
       // Running Ctrl+S instead of storing it would make the one screen for
       // changing shortcuts the one screen where they cannot be changed.
       if (eventElement?.closest(".keybinding-capture")) return;
+      if (eventElement?.closest(".macro-manager")) return;
+      if (matchesShortcut(event, keys.macroRecord)) { event.preventDefault(); event.stopPropagation(); toggleMacroRecording(); return; }
+      if (matchesShortcut(event, keys.macroManager)) { event.preventDefault(); setMacroManagerOpen(true); return; }
+      if (matchesShortcut(event, keys.structuralSearch)) { event.preventDefault(); setActiveDocument("structural-search"); return; }
+      if (matchesShortcut(event, keys.macroPlay)) {
+        event.preventDefault(); const macro = editorMacros.find(item => item.id === lastMacro.current) || editorMacros.at(-1);
+        if (macro) playEditorMacro(macro); else toast("Record and save a macro first.", "info"); return;
+      }
+      if (editorFocused) {
+        const macro = editorMacros.find(item => item.shortcut && matchesShortcut(event, item.shortcut));
+        if (macro) { event.preventDefault(); event.stopPropagation(); playEditorMacro(macro); return; }
+      }
       /**
        * Typing a name in the Explorer to get to it.
        *
@@ -9001,6 +9042,7 @@ function IdeApp() {
       window.removeEventListener("keydown", handleEscape);
     };
   }, [
+    editorMacros, playEditorMacro, toggleMacroRecording,
     activeDocument,
     activeFile,
     activePath,
@@ -9415,6 +9457,11 @@ function IdeApp() {
   }, []);
 
   const commands = useMemo(() => [
+    { label: macroState.recording ? "Macro: Stop recording" : "Macro: Start recording", detail: keys.macroRecord, icon: <Circle size={16} />, action: toggleMacroRecording },
+    { label: "Editor macros", detail: keys.macroManager, icon: <ListTree size={16} />, action: () => { setMacroDraft(null); setMacroManagerOpen(true); } },
+    ...editorMacros.map(macro => ({ label: `Macro: ${macro.name}`, detail: macro.shortcut || "Editor", icon: <Play size={16} />, action: () => playEditorMacro(macro) })),
+    { label: "Structural search & replace", detail: keys.structuralSearch, icon: <Search size={16} />, action: () => setActiveDocument("structural-search") },
+    { label: "GitHub Actions", detail: "Workflow runs, jobs and logs", icon: <Github size={16} />, action: () => setActiveDocument("github-actions") },
     { label: "Search Everywhere", detail: "Toolbar", icon: <Search size={16} />, action: () => { setPaletteMode("everywhere"); setPaletteQuery(""); setPaletteOpen(true); } },
     { label: "Neues Projekt", detail: "Java · Kotlin · Python · Rust · PHP · Lua · Go · C/C++/C#", icon: <Plus size={16} />, action: openNewProject },
     { label: "Projektordner öffnen", detail: "Ctrl+O", icon: <FolderOpen size={16} />, action: openWorkspace },
@@ -9615,6 +9662,7 @@ function IdeApp() {
       action: () => void openNamedWorkspace(profile.id),
     })),
   ], [
+    editorMacros, playEditorMacro, toggleMacroRecording, macroState.recording, keys.macroRecord, keys.macroManager, keys.structuralSearch,
     activeFile,
     activePath,
     activeRunConfiguration,
@@ -10002,6 +10050,8 @@ function IdeApp() {
     "git-compare": { label: gitComparison ? `${gitComparison.base} ↔ ${gitComparison.head}` : "Branch-Vergleich", icon: <GitBranch size={14} /> },
     "git-rebase": { label: "Interaktives Rebase", icon: <GitBranch size={14} /> },
     "git-pull-requests": { label: "Pull Requests", icon: <Github size={14} /> },
+    "github-actions": { label: "GitHub Actions", icon: <Github size={14} /> },
+    "structural-search": { label: "Structural search", icon: <Search size={14} /> },
     "refactor-preview": { label: "Refactoring-Vorschau", icon: <FileDiff size={14} /> },
     "java-refactor": { label: javaRefactorPlan?.title || "Java-Refactoring", icon: <FileDiff size={14} /> },
     "unused-private": { label: "Ungenutzter privater Code", icon: <CircleAlert size={14} /> },
@@ -10240,6 +10290,14 @@ function IdeApp() {
     if (activeDocument === "git-pull-requests") {
       return <GitPullRequestView root={workspaceRoot} onClose={() => setActiveDocument(null)} />;
     }
+    if (activeDocument === "github-actions") return <GitHubActionsView root={workspaceRoot} onConnect={() => setGithubSignInOpen(true)} onClose={() => setActiveDocument(null)} />;
+    if (activeDocument === "structural-search") return <StructuralSearchView root={workspaceRoot}
+      dirtyFiles={() => currentSessionRef.current.files.filter(isUnsaved).map(file => file.path)}
+      onOpen={(file, line, column) => { void openFile(file, { line, column }); }}
+      onApply={result => {
+        setOpenFiles(files => files.map(file => { const change = result.files.find(change => samePath(change.file, file.path)); return change && !isUnsaved(file) ? { ...file, content: change.content, savedContent: change.content } : file; }));
+        void refreshGit(workspaceRoot); toast(`Updated ${result.files.length} files.`, "success");
+      }} onClose={() => setActiveDocument(null)} />;
 
     if (activeDocument === "git-merge" && mergeEditor) {
       return <GitThreeWayMergeEditor
@@ -10929,6 +10987,7 @@ function IdeApp() {
                 <button onClick={() => { setActiveDocument("git-pull-requests"); setGitMenuOpen(false); }}>
                   <Github size={13} /><span>{t("Pull Requests")}</span>
                 </button>
+                <button onClick={() => { setActiveDocument("github-actions"); setGitMenuOpen(false); }}><Github size={13} /><span>GitHub Actions</span></button>
                 <button onClick={() => void openPullPreview()}>
                   <Download size={13} /><span>{t("Eingehende Änderungen prüfen")}</span>
                 </button>
@@ -13029,6 +13088,9 @@ function IdeApp() {
                   <button onClick={() => { setActiveDocument("docker"); setEditorMenuOpen(false); }}><Container size={14} /><span>{t("Docker & Container")}</span></button>
                   <button onClick={() => { setActiveDocument("git-graph"); setEditorMenuOpen(false); }}><GitBranch size={14} /><span>{t("Visueller Git-Graph")}</span></button>
                   <button onClick={() => { setActiveDocument("scratchpad"); setEditorMenuOpen(false); }}><FileText size={14} /><span>{t("Scratchpad & Notizen")}</span></button>
+                  <button onClick={() => { toggleMacroRecording(); setEditorMenuOpen(false); }}><Circle size={14} /><span>{macroState.recording ? "Stop macro recording" : "Start macro recording"}</span></button>
+                  <button onClick={() => { setMacroDraft(null); setMacroManagerOpen(true); setEditorMenuOpen(false); }}><ListTree size={14} /><span>Editor macros</span></button>
+                  <button onClick={() => { setActiveDocument("structural-search"); setEditorMenuOpen(false); }}><Search size={14} /><span>Structural search</span></button>
                   {activeFile?.language === "java" && (
                     <>
                       <button onClick={() => { const model = editorRef.current?.getModel(); if (model) void languageProviderRef.current?.organizeImports(model); setEditorMenuOpen(false); }}><ListTree size={14} /><span>{t("Imports organisieren")}</span></button>
@@ -13481,6 +13543,7 @@ function IdeApp() {
 
       <footer className="statusbar">
         <div>
+          {macroState.recording && <button className="macro-recording" onClick={toggleMacroRecording}>● REC · {macroState.count} · Stop</button>}
           <select
             className="layout-profile-switcher"
             value={activeLayoutId}
@@ -14179,6 +14242,10 @@ function IdeApp() {
         />
       )}
 
+      {macroManagerOpen && <MacroManager key={macroDraft ? "draft" : "saved"} macros={editorMacros} draft={macroDraft} reservedShortcuts={Object.values(keys)}
+        onSave={async macro => { setEditorMacros(await window.kiwi!.macros.save(macro)); lastMacro.current = macro.id; toast("Macro saved.", "success"); }}
+        onRemove={async id => { setEditorMacros(await window.kiwi!.macros.remove(id)); }}
+        onPlay={playEditorMacro} onRecord={toggleMacroRecording} onClose={() => { setMacroManagerOpen(false); setMacroDraft(null); }} />}
       {githubSignInOpen && (
         <GitHubSignInDialog
           onCancel={() => setGithubSignInOpen(false)}

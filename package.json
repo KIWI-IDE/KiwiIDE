@@ -32,6 +32,8 @@
     "test:dependency-advice": "node scripts/smoke-dependency-dialog.mjs --advice",
     "test:python-diagnostics": "node scripts/smoke-polyglot-editor.mjs --python-syntax-only",
     "test:application-icon": "node scripts/smoke-application-icon.mjs",
+    "test:workbench-tools": "node scripts/smoke-polyglot-editor.mjs --workbench-tools-only",
+    "test:github-actions": "node scripts/smoke-github-actions.mjs",
     "test:preload": "node scripts/smoke-startup-preload.mjs",
     "test:e2e:repeat": "node scripts/repeat-e2e.mjs",
     "test:e2e:packaged": "node scripts/smoke-electron.mjs --packaged",

@@ -50,7 +50,14 @@ ipcRenderer.on("app:updatePrepare", (_event, payload) => {
 
 contextBridge.exposeInMainWorld("kiwi", {
   platform: process.platform,
+  macros: {
+    list: () => invoke("macros:list"),
+    save: (macro) => invoke("macros:save", macro),
+    remove: (id) => invoke("macros:remove", id),
+  },
   workspace: {
+    structuralPreview: (root, options) => invoke("workspace:structuralPreview", { root, options }),
+    structuralApply: (root, planId, selectedIds, dirtyFiles) => invoke("workspace:structuralApply", { root, planId, selectedIds, dirtyFiles }),
     open: () => invoke("workspace:open"),
     register: (root) => invoke("workspace:register", root),
     restore: () => invoke("workspace:restore"),
@@ -285,6 +292,10 @@ contextBridge.exposeInMainWorld("kiwi", {
     pullRequest: (root, number) => invoke("git:pullRequest", { root, number }),
     createPullRequest: (root, input) => invoke("git:createPullRequest", { root, input }),
     githubStatus: () => invoke("github:status"),
+    actionsList: (root, options) => invoke("github:actionsList", { root, options }),
+    actionsDetails: (root, runId) => invoke("github:actionsDetails", { root, runId }),
+    actionsLogs: (root, runId, jobId) => invoke("github:actionsLogs", { root, runId, jobId }),
+    actionsRerunFailed: (root, runId) => invoke("github:actionsRerunFailed", { root, runId }),
     githubSignIn: (token) => invoke("github:signIn", token),
     githubSignOut: () => invoke("github:signOut"),
     githubBeginDeviceFlow: () => invoke("github:beginDeviceFlow"),

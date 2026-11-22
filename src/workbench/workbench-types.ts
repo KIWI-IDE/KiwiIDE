@@ -23,7 +23,7 @@ export type BackgroundOperation = {
   progress?: { done: number; total: number };
 };
 export type PerformanceMetric = { kind: "startup" | "project" | "index" | "memory"; value: number; unit: "ms" | "MB"; timestamp: string; projectRoot?: string };
-export type WorkbenchDocument = "git-commit" | "git-diff" | "git-merge" | "git-compare" | "git-rebase" | "git-pull-requests" | "refactor-preview" | "java-refactor" | "unused-private" | "web-preview" | "npm-packages" | "database" | "docker" | "git-graph" | "scratchpad";
+export type WorkbenchDocument = "git-commit" | "git-diff" | "git-merge" | "git-compare" | "git-rebase" | "git-pull-requests" | "refactor-preview" | "java-refactor" | "unused-private" | "web-preview" | "npm-packages" | "database" | "docker" | "git-graph" | "scratchpad" | "github-actions" | "structural-search";
 export type WorkbenchLayout = {
   id: string;
   name: string;

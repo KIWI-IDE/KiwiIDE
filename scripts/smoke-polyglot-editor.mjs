@@ -19,9 +19,10 @@ const screenshotsOnly = process.argv.includes("--screenshots-only");
 const capture = screenshotsOnly || process.argv.includes("--capture");
 const gradleModelOnly = process.argv.includes("--gradle-model-only");
 const pythonSyntaxOnly = process.argv.includes("--python-syntax-only");
+const toolsOnly = process.argv.includes("--workbench-tools-only");
 const gradleOnly = process.argv.includes("--gradle-only") || gradleModelOnly;
 const gradleScript = gradleOnly ? await fs.readFile(path.join(root, "tests", "fixtures", "catalog-build.gradle.kts"), "utf8") : "";
-const cases = pythonSyntaxOnly ? [
+const cases = toolsOnly ? [["macro.txt", "plaintext", "first\nmuch longer second", null]] : pythonSyntaxOnly ? [
   ["main.py", "python", await fs.readFile(path.join(root, "tests", "fixtures", "python-game-ui.py"), "utf8"), null],
 ] : gradleModelOnly ? [
   ["model.gradle.kts", "kotlin", "extensions.configure<DemoExtension> {\n    gre", "greeting"],
@@ -120,7 +121,11 @@ async function press(cdp, key, code, windowsVirtualKeyCode, modifiers = 0) {
 
 await fs.mkdir(path.join(project, ".kiwi"), { recursive: true });
 await fs.mkdir(userData, { recursive: true });
-if (!gradleOnly) await fs.writeFile(path.join(project, ".kiwi", "language.json"), JSON.stringify({ version: 1, language: "python" }));
+if (!gradleOnly) await fs.writeFile(path.join(project, ".kiwi", "language.json"), JSON.stringify({ version: 1, language: toolsOnly ? "javascript" : "python" }));
+if (toolsOnly) {
+  await fs.writeFile(path.join(project, "package.json"), JSON.stringify({ name: "kiwi-tools-fixture", private: true }));
+  await fs.writeFile(path.join(project, "search.ts"), '// console.log(fake)\nconst text = "console.log(fake)";\nconsole . log(first);\nconsole.log(second);\n');
+}
 if (gradleOnly) {
   await fs.writeFile(path.join(project, ".kiwi", "project.json"), JSON.stringify({ autoSyncBuild: false, gradleOffline: true }));
   await fs.mkdir(path.join(project, "gradle"), { recursive: true });
@@ -183,6 +188,44 @@ try {
     })()`), 12_000, `Explorer row ${name}`);
     await until(() => evaluate(cdp, `Boolean(document.querySelector('.tab.active[data-file-path="' + CSS.escape(${JSON.stringify(file)}) + '"]'))`), 12_000, `active tab ${name}`);
     await until(() => evaluate(cdp, `Boolean(document.querySelector('[data-mode-id="${language}"] .monaco-editor textarea'))`), 20_000, `Monaco language ${language}`);
+    if (toolsOnly) {
+      const focus = () => evaluate(cdp, 'document.querySelector("[data-mode-id=plaintext] .monaco-editor textarea").focus()');
+      await focus(); await press(cdp, 'Home', 'Home', 36, 2);
+      await press(cdp, 'R', 'KeyR', 82, 11);
+      await until(() => evaluate(cdp, 'Boolean(document.querySelector(".macro-recording"))'), 10_000, 'macro recording indicator');
+      await press(cdp, 'End', 'End', 35);
+      await cdp.send('Input.insertText', {text:'!'});
+      await press(cdp, 'R', 'KeyR', 82, 11);
+      await until(() => evaluate(cdp, 'Boolean(document.querySelector(".macro-manager"))'), 10_000, 'macro manager after recording');
+      const fill = async (selector, value) => { await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)}).focus()`); await press(cdp, 'a', 'KeyA', 65, 2); await cdp.send('Input.insertText', {text:value}); };
+      await fill('.macro-details label:first-child input', 'Append marker');
+      await evaluate(cdp, 'document.querySelector(".macro-details .keybinding-capture").focus()');
+      await press(cdp, 'Y', 'KeyY', 89, 11);
+      await evaluate(cdp, '[...document.querySelectorAll(".macro-manager button")].find(button=>button.textContent === "Save macro").click()');
+      await until(() => evaluate(cdp, 'window.kiwi.macros.list().then(values=>values.some(macro=>macro.name === "Append marker" && macro.shortcut === "Ctrl+Alt+Shift+Y"))', true), 10_000, 'saved macro and shortcut');
+      await evaluate(cdp, 'document.querySelector(".macro-manager > header button").click()');
+      await focus(); await press(cdp, 'End', 'End', 35, 2); await press(cdp, 'Home', 'Home', 36);
+      await press(cdp, 'Y', 'KeyY', 89, 11); await press(cdp, 's', 'KeyS', 83, 2);
+      await until(async () => (await fs.readFile(file, 'utf8')) === 'first!\nmuch longer second!', 10_000, 'macro replay at another line length');
+      await press(cdp, 'z', 'KeyZ', 90, 2); await press(cdp, 's', 'KeyS', 83, 2);
+      await until(async () => (await fs.readFile(file, 'utf8')) === 'first!\nmuch longer second', 10_000, 'single-step macro undo');
+      await press(cdp, 'F', 'KeyF', 70, 11);
+      await until(() => evaluate(cdp, 'Boolean(document.querySelector(".structural-form"))'), 10_000, 'structural search entry');
+      await evaluate(cdp, '(() => {const select=document.querySelector(".structural-form select"); select.value="javascript";select.dispatchEvent(new Event("change",{bubbles:true}));})()');
+      await fill('.structural-form label:nth-child(2) textarea', 'console.log($x$)');
+      await fill('.structural-form label:nth-child(3) textarea', 'logger.info($x$)');
+      await evaluate(cdp, 'document.querySelector(".structural-form button[type=submit]").click()');
+      await until(() => evaluate(cdp, 'document.querySelectorAll(".structural-match").length === 2'), 10_000, 'structural code matches excluding comments and strings');
+      await evaluate(cdp, 'document.querySelectorAll(".structural-match input")[1].click()');
+      if (capture) { const shot=await cdp.send('Page.captureScreenshot',{format:'png'}); await fs.writeFile(path.join(root,'.kiwi','structural-search.png'),Buffer.from(shot.data,'base64')); }
+      await evaluate(cdp, '[...document.querySelectorAll(".structural-form button")].find(button=>button.textContent.includes("Apply 1 selected")).click()');
+      await until(async () => (await fs.readFile(path.join(project, 'search.ts'), 'utf8')).includes('logger.info(first);\nconsole.log(second);'), 10_000, 'selected structural replacement');
+      const text = await fs.readFile(path.join(project, 'search.ts'), 'utf8');
+      assert(text.startsWith('// console.log(fake)\nconst text = "console.log(fake)";'));
+      assert((JSON.parse(await fs.readFile(path.join(userData, 'editor-macros.json'), 'utf8'))).some(macro=>macro.name==='Append marker'));
+      await evaluate(cdp, 'window.kiwi.workspace.undo(' + JSON.stringify(project) + ')', true);
+      assert((await fs.readFile(path.join(project, 'search.ts'), 'utf8')).includes('console . log(first)'));
+    }
     if (pythonSyntaxOnly) {
       const errorCount = () => evaluate(cdp, 'Number(document.querySelector(".statusbar > div:first-child > button:last-child").textContent.trim())');
       await new Promise(resolve => setTimeout(resolve, 400));
@@ -241,7 +284,7 @@ try {
     }
     await press(cdp, "Escape", "Escape", 27);
   }
-  if (capture && !pythonSyntaxOnly) {
+  if (capture && !pythonSyntaxOnly && !toolsOnly) {
     await evaluate(cdp, `window.kiwi.app.openSettings(${JSON.stringify(project)})`, true);
     const settings = await windowFor("settings");
     await settings.send("Page.bringToFront");
@@ -256,7 +299,7 @@ try {
   }
   const health = await evaluate(cdp, "window.kiwi.app.health()", true);
   if (!gradleOnly) assert.equal(health.language.sessions, 0, "A non-Java project must not start JDT LS.");
-  console.log(pythonSyntaxOnly ? "Python diagnostics passed: multiline calls accepted, real syntax errors marked, repaired markers cleared, completion help visible." : gradleOnly ? "Gradle Kotlin completion passed: reported script, live catalog aliases, visible suggestions and accepted edits." : screenshotsOnly ? "Hybrid editor screenshots saved: .kiwi/polyglot-editor.png and .kiwi/polyglot-settings.png." : `Hybrid editor smoke passed: ${cases.length} file languages, all 11 native families, local completions and web workers.`);
+  console.log(toolsOnly ? "Workbench tools passed: recorded macro, persistent shortcut, replay across line lengths, one-step undo, structural preview, selected replacement and project undo." : pythonSyntaxOnly ? "Python diagnostics passed: multiline calls accepted, real syntax errors marked, repaired markers cleared, completion help visible." : gradleOnly ? "Gradle Kotlin completion passed: reported script, live catalog aliases, visible suggestions and accepted edits." : screenshotsOnly ? "Hybrid editor screenshots saved: .kiwi/polyglot-editor.png and .kiwi/polyglot-settings.png." : `Hybrid editor smoke passed: ${cases.length} file languages, all 11 native families, local completions and web workers.`);
 } catch (error) {
   if (pythonSyntaxOnly) {
     console.error('Python buffer at failure:', await fs.readFile(path.join(project, 'main.py'), 'utf8').catch(() => 'unavailable'));
