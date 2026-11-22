@@ -11,11 +11,16 @@ Kiwi IDE is a multi-language desktop development environment for Windows, Linux,
 | Area | What you can do |
 | --- | --- |
 | **Java editing** | Get code suggestions, jump to definitions and references, organize imports, rename symbols, and apply quick fixes. |
+| **Editor macros** | Record editing steps, save reusable macros, assign shortcuts, and replay them at the cursor. |
+| **Structural search** | Find code patterns with named placeholders, review changes, and replace selected matches with project undo. |
+| **GitHub Actions** | Inspect workflow runs, jobs, steps, and logs, and explicitly re-run failed jobs. |
 | **Project setup** | Create plain Java, Maven, or Gradle projects. Manage dependencies and run build tasks from the IDE. |
 | **Debugging and testing** | Set breakpoints, inspect variables, run JUnit tests, and view coverage in the editor. |
 | **Git** | Review diffs, stage changes, commit, switch branches, and resolve merge conflicts. |
 | **Terminal** | Use PowerShell on Windows or your own shell on Linux and macOS. |
 | **Workspace** | Switch between projects while keeping their tabs, terminals, and run configurations separate. Dock tool windows or open them in a separate window. |
+
+See the [workbench tools guide](docs/workbench-tools.md) for macros, structural search, and GitHub Actions.
 
 ## Languages
 

@@ -1,6 +1,6 @@
 {
   "name": "kiwi-ide",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "author": "Kiwi IDE Contributors",
   "description": "A focused desktop IDE for Java, Kotlin, Python, Rust, PHP, Lua, Go and the C family.",
