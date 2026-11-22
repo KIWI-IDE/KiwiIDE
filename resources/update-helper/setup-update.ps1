@@ -91,8 +91,14 @@ function Start-KiwiProcess {
         PassThru = $true
     }
     if ($Arguments.Count -gt 0) { $parameters.ArgumentList = Join-KiwiCommandLine $Arguments }
-    if ($Wait) { $parameters.Wait = $true; $parameters.WindowStyle = 'Hidden' }
-    return Start-Process @parameters
+    if ($Wait) { $parameters.WindowStyle = 'Hidden' }
+    $started = Start-Process @parameters
+    if ($Wait) {
+        # Start-Process -Wait waits for descendants too. NSIS can reopen Kiwi;
+        # waiting for that new IDE would postpone verification until it closes.
+        $started.WaitForExit()
+    }
+    return $started
 }
 
 function Read-KiwiArguments([string]$Encoded) {
