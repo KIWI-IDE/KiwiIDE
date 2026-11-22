@@ -10383,6 +10383,41 @@ button.file-health-item:hover { background: var(--panel-05); }
   padding: 4px 7px;
 }
 
+.dependency-advice {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 190px;
+  overflow: auto;
+  display: grid;
+  gap: 5px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--panel-02);
+  font-size: 11px;
+}
+.dependency-advice > strong { color: var(--accent-bright); }
+.dependency-advice > strong.incompatible { color: var(--red); }
+.dependency-advice small, .dependency-advice p { color: var(--text-muted); margin: 0; line-height: 1.45; }
+.dependency-advice > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dependency-advice button { padding: 4px 7px; color: var(--accent-bright); }
+.dependency-advice label { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.dependency-editor-advice { grid-column: 1 / -1; min-width: 0; }
+.completion-status-control { position: relative; min-width: 0; }
+.completion-status-control > button { max-width: 235px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.completion-status-popover {
+  position: fixed; bottom: 30px; right: 18px; z-index: 250;
+  width: min(410px, calc(100vw - 36px)); max-height: min(470px, calc(100vh - 80px)); overflow: auto;
+  padding: 12px; border: 1px solid var(--border); border-radius: calc(7px * var(--roundness, 1));
+  background: var(--panel-02); color: var(--text); box-shadow: 0 12px 40px #0006;
+  user-select: text; font-size: 12px; white-space: normal;
+}
+.completion-status-popover header, .completion-status-popover footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.completion-status-popover article { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.completion-status-popover p { margin: 5px 0; color: var(--text-muted); line-height: 1.5; }
+.completion-status-popover small { display: block; overflow-wrap: anywhere; color: var(--text-faint); }
+.completion-status-popover button { padding: 5px 7px; border: 1px solid var(--border); background: var(--panel-04); border-radius: 4px; }
+.completion-status-popover footer { margin-top: 10px; justify-content: flex-start; }
+
 .dependency-results {
   flex: 1 1 auto;
   min-height: 0;

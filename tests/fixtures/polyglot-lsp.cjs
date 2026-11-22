@@ -12,6 +12,7 @@ connection.onRequest("initialize", async (params) => {
   return { capabilities: { positionEncoding: "utf-16", completionProvider: { resolveProvider: true }, textDocumentSync: { openClose: true, change: 2, save: { includeText: true } } } };
 });
 connection.onNotification("initialized", () => notifications.push({ method: "initialized" }));
+connection.onNotification("workspace/didChangeConfiguration", ({ settings }) => notifications.push({ method: "configuration", settings }));
 connection.onNotification("textDocument/didOpen", ({ textDocument }) => {
   documents.set(textDocument.uri, { ...textDocument });
   notifications.push({ method: "open", ...textDocument });

@@ -406,6 +406,34 @@ export interface DependencyCandidate {
   repositoryUrl?: string;
 }
 
+export interface GradleModelMember {
+  name: string; kind: "method" | "property"; type: string; returns: string;
+  signature: string; parameters: Array<{ name: string; type: string }>;
+}
+export interface GradleEditorModel {
+  schema: number; gradleVersion: string;
+  types: Record<string, GradleModelMember[]>;
+  projects: Array<{ path: string; directory: string; configurations: string[];
+    extensions: Array<{ name: string; type: string }>;
+    tasks: Array<{ name: string; path: string; type: string; description: string }>;
+  }>;
+}
+export interface GradleEditorState {
+  state: "loading" | "ready" | "error" | "outdated";
+  reason: string; model: GradleEditorModel | null; updatedAt: number;
+}
+
+export interface DependencyVersionAdvice {
+  version: string; status: "compatible" | "incompatible" | "unknown";
+  reasons: string[]; notes: string[]; requiredJava: number | null;
+  minecraftVersion: string | null; evidence: string | null;
+}
+export interface DependencyAdvice {
+  javaTarget: number | null; minecraftTarget: string | null; currentVersion: string;
+  recommendedVersion: string | null; versions: DependencyVersionAdvice[]; checkedAt: number;
+}
+export interface DependencyAdviceOptions { sourceId?: string; buildFile?: string; version?: string }
+
 export interface DependencyAudit {
   type: ProjectInfo["type"];
   dependencies: Array<{ coordinate: string; version: string }>;
@@ -1601,6 +1629,9 @@ export interface KiwiApi {
     tasks(root: string, refresh?: boolean): Promise<{ type: string; tasks: ProjectTask[]; modules: string[]; profiles: BuildProfile[]; reason?: string }>;
     dependencies(root: string): Promise<string>;
     searchDependencies(query: string, limit?: number, sourceId?: string): Promise<DependencyCandidate[]>;
+    gradleEditorModel(root: string, refresh?: boolean): Promise<GradleEditorState>;
+    onGradleEditorModel(callback: (payload: GradleEditorState & { root: string }) => void): () => void;
+    dependencyAdvice(root: string, groupId: string, artifactId: string, options?: DependencyAdviceOptions): Promise<DependencyAdvice>;
     dependencyVersions(groupId: string, artifactId: string, sourceId?: string): Promise<string[]>;
     listDependencies(root: string): Promise<DependencyEditorModel>;
     addDependency(root: string, coordinates: { groupId: string; artifactId: string; version: string }, scope?: string, options?: AddDependencyOptions): Promise<DependencyMutationResult>;

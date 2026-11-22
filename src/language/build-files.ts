@@ -310,14 +310,15 @@ function gradleContext(text: string, offset: number): { path: string[]; code: bo
 export function gradleBlockPath(text: string, offset: number): string[] {
   return gradleContext(text, offset).path;
 }
+export function isGradleCode(text: string, offset: number): boolean { return gradleContext(text, offset).code; }
 
 /** The complete accessor is replaced, including text beyond the caret. */
-export function gradleCatalogQueryAt(text: string, offset: number): { catalog: string; accessor: string; start: number; end: number } | null {
+export function gradleCatalogQueryAt(text: string, offset: number, configurations: string[] = []): { catalog: string; accessor: string; start: number; end: number } | null {
   if (!gradleContext(text, offset).code) return null;
   const match = /\b([A-Za-z_]\w*)((?:\.[A-Za-z0-9_]*)+)$/.exec(text.slice(0, offset));
   if (!match) {
     const argument = /\b([A-Za-z_]\w*)\s*\(\s*([A-Za-z0-9_]*)$/.exec(text.slice(0, offset));
-    if (!argument || !GRADLE_CONFIGURATIONS.has(argument[1])) return null;
+    if (!argument || (!GRADLE_CONFIGURATIONS.has(argument[1]) && !configurations.includes(argument[1]))) return null;
     const term = argument[2];
     const rest = /^[A-Za-z0-9_.]*/.exec(text.slice(offset))?.[0] || "";
     return { catalog: "", accessor: term, start: offset - term.length, end: offset + rest.length };
@@ -382,7 +383,7 @@ export function gradleCompletions(text: string, offset: number): BuildSuggestion
  * The answer drives a Maven Central lookup, so it has to be precise: offering
  * artifact names while someone types a version is worse than offering nothing.
  */
-export function coordinateQueryAt(text: string, offset: number, kind: "maven" | "gradle"): CoordinateQuery | null {
+export function coordinateQueryAt(text: string, offset: number, kind: "maven" | "gradle", configurations: string[] = []): CoordinateQuery | null {
   if (kind === "maven") {
     const path = mavenElementPath(text, offset);
     const element = path[path.length - 1] || "";
@@ -402,7 +403,7 @@ export function coordinateQueryAt(text: string, offset: number, kind: "maven" | 
   // Gradle: inside the string of a dependency configuration, "group:name:version".
   const line = text.slice(text.lastIndexOf("\n", offset - 1) + 1, offset);
   const call = /\b([A-Za-z][\w]*)\s*[( ]\s*["']([^"']*)$/.exec(line);
-  if (!call || !GRADLE_CONFIGURATIONS.has(call[1])) return null;
+  if (!call || (!GRADLE_CONFIGURATIONS.has(call[1]) && !configurations.includes(call[1]))) return null;
   const [groupId = "", artifactId = "", version = ""] = call[2].split(":");
   const parts = call[2].split(":").length;
   return {
@@ -474,8 +475,8 @@ export function mvnRepositoryUrl(groupId: string, artifactId: string, version = 
  * Returned as offsets rather than a Monaco range so the rule can be tested
  * without an editor. Null where the caret is not in a coordinate at all.
  */
-export function coordinateSpanAt(text: string, offset: number, kind: "maven" | "gradle"): TextSpan | null {
-  if (!coordinateQueryAt(text, offset, kind)) return null;
+export function coordinateSpanAt(text: string, offset: number, kind: "maven" | "gradle", configurations: string[] = []): TextSpan | null {
+  if (!coordinateQueryAt(text, offset, kind, configurations)) return null;
   if (kind === "maven") {
     const start = text.lastIndexOf(">", offset - 1) + 1;
     return start > 0 ? { start, end: offset } : null;

@@ -176,6 +176,8 @@ import { findTheme, monacoThemeId, resolveTokenColors, resolveWorkbenchColors, t
 import { javaLanguageDefinition, javaKeywords, javaKeywordScope } from "./language/java-tokenizer";
 import { HTTP_LANGUAGE_ID, installHttpLanguage } from "./language/http-language";
 import { installBuildFileCompletion } from "./language/build-completion";
+import { CompletionStatus } from "./components/CompletionStatus";
+import type { DependencyAdviceOptions } from "./types";
 import { parseHttpFile, requestAtLine, type HttpRequestDefinition } from "./language/http-file";
 import { findCodeSyntaxProblems, type SyntaxProblem } from "./language/syntax-router";
 import { findJavaTestTargets, type JavaTestTarget } from "./language/java-tests";
@@ -3406,6 +3408,10 @@ function IdeApp() {
   );
   const dependencyVersions = useCallback(
     (groupId: string, artifactId: string, sourceId?: string) => window.kiwi!.project.dependencyVersions(groupId, artifactId, sourceId),
+    [],
+  );
+  const dependencyAdvice = useCallback(
+    (groupId: string, artifactId: string, options: DependencyAdviceOptions) => window.kiwi!.project.dependencyAdvice(workspaceRootRef.current, groupId, artifactId, options),
     [],
   );
   /**
@@ -13504,6 +13510,13 @@ function IdeApp() {
           </button>
         </div>
         <div>
+          <CompletionStatus file={activePath || ""} onSync={() => {
+            const editor = monacoRef.current?.editor.getEditors().find(item => item.getModel() && activePath && samePath(item.getModel()!.uri.fsPath, activePath));
+            editor?.focus();
+            polyglotProviderRef.current?.refreshModels(true);
+            if (workspaceRoot && /\.gradle(?:\.kts)?$/i.test(activePath || "")) void window.kiwi?.project.gradleEditorModel(workspaceRoot, true).catch(() => undefined);
+            editor?.trigger("kiwi", "editor.action.triggerSuggest", {});
+          }} onSettings={() => { void window.kiwi?.app.openSettings(workspaceRoot); }} />
           {/* The detail text is set in a dozen places — sync progress, index
               state, explained failures — and used to be displayed nowhere. */}
           {activeEditorLanguage !== "java" ? (
@@ -14032,6 +14045,7 @@ function IdeApp() {
           buildType={projectInfo.type}
           onSearch={searchDependencies}
           onVersions={dependencyVersions}
+          onAdvice={dependencyAdvice}
           buildFiles={dependencyEditorModel?.buildFiles}
           // Without a file in mind, the module being worked in is the one
           // meant — not the first build file of the project, which in a

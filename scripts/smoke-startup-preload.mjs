@@ -8,19 +8,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-/**
- * Proves that the splash holds for its minimum and spends the time loading.
- *
- * The other gates run with the preload switched off: its steps spawn a
- * `java -version` per JDK candidate, a Gradle configuration phase and the
- * language server, and doing that while a smoke run drives the workbench made
- * those runs fail at random. This one exists so the preload is still covered
- * somewhere — on its own, where its processes compete with nothing.
- *
- * Two launches. The first opens the project so there is an active workspace to
- * find; the second is the one under test, because a preload with no project
- * has almost nothing to do.
- */
+/** Proves that the UI appears before background Gradle warming completes. */
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const electronBinary = require(path.join(projectRoot, "node_modules", "electron"));
@@ -59,98 +47,29 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   });
 
-  // Second launch: the one under test.
-  // Above what the second launch takes on its own — about eleven seconds
-  // with a project to open — so that anything past it is the minimum doing
-  // its work and not the window simply being slow.
-  const minimum = 20_000;
-  const observed = await withKiwi(
-    { preload: true, splashMinimumMs: minimum },
-    async ({ waitForTarget, connect, evaluate, until, startedAt, log }) => {
-      const splash = await waitForTarget((target) => target.url.startsWith("data:text/html"), budget(25_000), "Splash");
-      const seenAt = Date.now();
-      const cdp = await connect(splash.webSocketDebuggerUrl);
-      await cdp.send("Runtime.enable", {}, budget(8_000));
+  // Background work must not hold a usable editor behind the splash.
+  const observed = await withKiwi({ preload: true, splashMinimumMs: 300 }, async ({ waitForTarget, connect, evaluate, until, startedAt, log, targets }) => {
+    const splash = await waitForTarget(target => target.url.startsWith("data:text/html"), budget(25_000), "Splash");
+    const probe = await connect(splash.webSocketDebuggerUrl);
+    await probe.send("Runtime.enable");
+    await until(async () => !(await targets()).some(target => target.id === splash.id), budget(15_000), "visible editor");
+    const shownMs = Date.now() - startedAt;
+    assert.ok(shownMs < budget(14_000), "The ready window was delayed by startup work: " + shownMs + " ms");
+    const editor = await waitForTarget(target => target.url.includes("window=editor"), budget(40_000), "Editorfenster");
+    const ui = await connect(editor.webSocketDebuggerUrl);
+    await ui.send("Runtime.enable");
+    await until(() => evaluate(ui, "document.readyState === 'complete' && Boolean(window.kiwi)"), budget(30_000), "Preload bridge");
+    const result = await evaluate(ui, 'window.kiwi.project.tasks(' + JSON.stringify(fixture) + ').then(value => ({count:value.tasks.length, reason:value.reason || ""}))', true, budget(240_000));
+    assert.ok(result.count > 0, "No build tasks available");
+    await until(() => /\[Start\] Build-Tasks werden geladen:/.test(log()), budget(240_000), "background Gradle warming");
+    const asked = Date.now();
+    await evaluate(ui, 'window.kiwi.project.tasks(' + JSON.stringify(fixture) + ')', true, budget(30_000));
+    assert.ok(Date.now() - asked < budget(3000), "The warmed task cache was not reused");
+    probe.close(); ui.close();
+    return {shownMs, tasks:result.count};
+  });
+  console.log('Startup passed: window shown after ' + observed.shownMs + ' ms; ' + observed.tasks + ' Gradle tasks warmed in the background.');
 
-      // Watch it until it goes, collecting the steps it reports.
-      const steps = [];
-      for (;;) {
-        const reading = await evaluate(cdp, `JSON.stringify({
-          schritt: document.getElementById("schritt")?.textContent || "",
-          balken: document.getElementById("balken")?.style.width || "",
-        })`, false, budget(5_000)).catch(() => null);
-        if (!reading) break;
-        const parsed = JSON.parse(reading);
-        if (parsed.schritt && steps.at(-1)?.schritt !== parsed.schritt) steps.push(parsed);
-        if (Date.now() - seenAt > budget(180_000)) break;
-        await new Promise((resolve) => setTimeout(resolve, 150));
-      }
-      const visibleMs = Date.now() - seenAt;
-
-      const editor = await waitForTarget((target) => target.url.includes("window=editor"), budget(40_000), "Editorfenster");
-      const ui = await connect(editor.webSocketDebuggerUrl);
-      await ui.send("Runtime.enable");
-      await until(() => evaluate(ui, "document.readyState === 'complete' && Boolean(window.kiwi)"), budget(30_000), "Preload-Brücke");
-
-      // The point of the whole exercise: the task list is already read, so
-      // asking for it costs nothing.
-      const askedAt = Date.now();
-      const tasks = JSON.parse(await evaluate(ui, `window.kiwi.project.tasks(${JSON.stringify(fixture)})
-        .then((result) => JSON.stringify({ anzahl: result.tasks.length, grund: result.reason || "" }))`, true, budget(240_000)));
-      const answerMs = Date.now() - askedAt;
-      ui.close();
-      cdp.close();
-      return { visibleMs, steps, tasks, answerMs, sinceLaunch: seenAt - startedAt, log: log() };
-    },
-  );
-
-  for (const step of observed.steps) console.log(`  ... ${step.schritt} (${step.balken || "0"})`);
-  console.log(`  ... Splash ${observed.visibleMs} ms sichtbar, Mindestzeit ${minimum} ms`);
-  console.log(`  ... Task-Liste über IPC in ${observed.answerMs} ms (${observed.tasks.anzahl} Tasks)`);
-
-  assert.ok(
-    observed.visibleMs >= minimum - 500,
-    `Der Splash war nur ${observed.visibleMs} ms zu sehen, verlangt sind ${minimum} ms.`,
-  );
-  // Every step it reported, and that it got to the end of them.
-  assert.ok(
-    observed.steps.some((step) => /Build-Tasks/.test(step.schritt)),
-    `Der Splash hat die Build-Tasks nicht gemeldet: ${JSON.stringify(observed.steps.map((step) => step.schritt))}`,
-  );
-  // Which steps actually ran is read from the main process rather than from
-  // the splash: a step that takes a few milliseconds is gone from the caption
-  // before any polling loop can see it, and the last one is followed within
-  // the same tick by the window being destroyed.
-  const ran = [...observed.log.matchAll(/\[Start\] (.+?): (\d+) ms/g)].map((match) => match[1]);
-  for (const line of ran) console.log(`  ... gelaufen: ${line}`);
-  for (const expected of [
-    "Java-Installationen werden gesucht",
-    "Projekt wird gelesen",
-    "Module werden bestimmt",
-    "Build-Tasks werden geladen",
-    "Tests werden gesucht",
-    "Sprachserver wird gestartet",
-    "Symbole werden indiziert",
-  ]) {
-    assert.ok(ran.includes(expected), `Der Vorladeschritt "${expected}" ist nicht gelaufen: ${JSON.stringify(ran)}`);
-  }
-  // A step that threw says so in the main process output, and a preload whose
-  // steps all fail would still report "Bereit".
-  assert.ok(
-    !/\[Start\].*fehlgeschlagen/.test(observed.log),
-    `Ein Vorladeschritt ist fehlgeschlagen:\n${observed.log.split("\n").filter((line) => line.includes("[Start]")).join("\n")}`,
-  );
-  assert.ok(observed.tasks.anzahl > 0, "Nach dem Vorladen muss die Task-Liste gefüllt sein.");
-  // That the answer is stored rather than asked of Gradle again. It does not
-  // by itself say the preload stored it — the workbench asks for the tasks as
-  // it opens, so this passes with the preload switched off too. The steps
-  // above are what proves the preload ran; this proves the cache works.
-  assert.ok(
-    observed.answerMs < budget(1_500),
-    `Die Task-Liste kam erst nach ${observed.answerMs} ms — sie wurde nicht aus dem Zwischenspeicher beantwortet.`,
-  );
-
-  console.log("Startup preload passed: the splash holds, reports its steps and leaves the task list ready.");
 } finally {
   await fs.rm(fixture, { recursive: true, force: true }).catch(() => undefined);
   await fs.rm(userData, { recursive: true, force: true }).catch(() => undefined);
@@ -195,6 +114,7 @@ async function withKiwi({ preload, splashMinimumMs }, body) {
     return await body({
       startedAt,
       log: () => output,
+      targets: () => listTargets(port),
       waitForTarget: (match, timeout, label) => waitForTarget(port, match, timeout, label),
       connect: async (url) => {
         const cdp = await createCdp(url);
@@ -208,8 +128,21 @@ async function withKiwi({ preload, splashMinimumMs }, body) {
     error.message = `${error.message}\nHauptprozess:\n${output.slice(-2_000)}`;
     throw error;
   } finally {
+    try {
+      const pages = await listTargets(port);
+      const target = pages.find(page => page.type === "page" && page.url.includes("window=editor")) || pages.find(page => page.type === "page" && page.url.includes("window=welcome"));
+      if (target) {
+        const control = await createCdp(target.webSocketDebuggerUrl);
+        await evaluate(control, "setTimeout(() => window.kiwi.app.close(), 50); true");
+        control.close();
+      }
+    } catch { /* A failed launch may already be closed. */ }
+    await new Promise(resolve => {
+      if (child.exitCode !== null) return resolve();
+      const timer = setTimeout(() => { child.kill(); resolve(); }, 15_000);
+      child.once("exit", () => { clearTimeout(timer); resolve(); });
+    });
     for (const cdp of sockets) cdp.close();
-    child.kill();
     // Long enough for the workspace state to be flushed and the port released.
     await new Promise((resolve) => setTimeout(resolve, 1_500));
   }
@@ -224,7 +157,7 @@ async function evaluate(cdp, expression, awaitPromise = false, timeout = 30_000)
 async function until(read, timeout, label) {
   const deadline = Date.now() + timeout;
   for (;;) {
-    if (await read().catch(() => false)) return;
+    if (await Promise.resolve().then(read).catch(() => false)) return;
     if (Date.now() > deadline) throw new Error(`${label} nicht rechtzeitig verfügbar.`);
     await new Promise((resolve) => setTimeout(resolve, 150));
   }

@@ -34,6 +34,58 @@ describe("instant Python syntax check", () => {
     expect(clean(code)).toEqual([]);
   });
 
+  it("accepts the multiline game UI calls and tuples from the reported example", () => {
+    const code = `def build_ui():
+    title_text = Text('BLOCKWELT', parent=camera.ui, x=-.85, y=.45, scale=1.35,
+                     color=color.white)
+    help_text = Text('WASD: Gehen | Maus: Blick',
+                    parent=camera.ui, x=-.85, y=.405, scale=.7, color=color.white)
+    slots: list[Entity] = []
+    for i, block in enumerate(HOTBAR):
+        x = (i - (len(HOTBAR) - 1) / 2) * .115
+        frame = Entity(parent=camera.ui, model='quad', position=(x, -.425),
+                       scale=(.105, .105), color=color.rgba(34, 39, 48, 235))
+        Entity(parent=frame, model='quad', z=-.01, scale=(.74, .74),
+               color=color.rgb(*BLOCK_TYPES[block][1]))
+        Text(str(i + 1), parent=camera.ui, position=(x - .045, -.39),
+             scale=.72, color=color.white)
+        slots.append(frame)
+    return slots
+`;
+    expect(clean(code)).toEqual([]);
+    expect(clean(code.replace(/\n/g, "\r\n"))).toEqual([]);
+  });
+
+  it("uses the starting indentation of joined statements and multiline headers", () => {
+    expect(clean([
+      "def greet(", "    name: str,", "    count: int = 1,", ") -> str:",
+      "    if (", "        count > 0", "    ):", "        return (", "            name", "        )",
+      "    return \\", "        name", "",
+      "for value in (", "    1, 2, 3", "):", "    print(value)",
+    ].join("\n"))).toEqual([]);
+  });
+
+  it("accepts inline suites, soft keyword names and arbitrary continuation alignment", () => {
+    expect(clean([
+      "match = 1", "case: int = 2", "def greet(): return 'hello'", "if match: print(case)",
+      "def ui():", "    text = Text(", "\t  'hello',", " color='white',", "    )",
+      "    return text", "value = ++case", "other = case++match",
+    ].join("\n"))).toEqual([]);
+  });
+
+  it("ignores continuation-like text inside comments and multiline strings", () => {
+    expect(clean([
+      'def greet():', '    """A docstring', '      arbitrary indentation', '    """',
+      '    text = "backslash \\ "', '    # comment \\ ', '    return text',
+    ].join("\n"))).toEqual([]);
+  });
+
+  it("still checks missing blocks and genuine bad indentation after continuations", () => {
+    expect(clean('if (\n    True\n):\nprint("missing indent")').some(p => p.kind === "expected-indent")).toBe(true);
+    expect(clean('value = Text(\n    "hello"\n)\n    bad_indent = 1').some(p => p.kind === "unexpected-indent")).toBe(true);
+    expect(clean('def greet(\n    name\n)\n    return name').some(p => p.kind === "missing-colon")).toBe(true);
+  });
+
   it("detects missing colon after def, if, and class", () => {
     const code = [
       "def calculate(x, y)",

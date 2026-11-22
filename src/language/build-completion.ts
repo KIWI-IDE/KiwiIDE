@@ -13,7 +13,9 @@
  */
 
 import type * as MonacoEditor from "monaco-editor";
-import type { DependencyCandidate, KiwiApi, VersionCatalogInfo } from "../types";
+import type { DependencyCandidate, KiwiApi, VersionCatalogInfo, GradleEditorState } from "../types";
+import { gradleModelSuggestions, gradleProjectForFile, gradleTaskSuggestions } from "./gradle-model-completion";
+import { reportCompletionStatus } from "./completion-status";
 import {
   buildFileKind,
   coordinateQueryAt,
@@ -45,10 +47,10 @@ let installed: MonacoEditor.IDisposable[] = [];
  */
 const searchCache = new Map<string, DependencyCandidate[]>();
 
-async function withTimeout<T>(work: Promise<T>, fallback: T): Promise<T> {
+async function withTimeout<T>(work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const guard = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), SEARCH_TIMEOUT_MS);
+  const guard = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("KIWI_COMPLETION_TIMEOUT")), SEARCH_TIMEOUT_MS);
   });
   try {
     return await Promise.race([work, guard]);
@@ -62,8 +64,7 @@ async function searchDependencies(api: KiwiApi, query: string): Promise<Dependen
   const cached = searchCache.get(key);
   if (cached) return cached;
   const found = await withTimeout(
-    api.project.searchDependencies(query, 40).catch(() => [] as DependencyCandidate[]),
-    [] as DependencyCandidate[],
+    api.project.searchDependencies(query, 40),
   );
   if (found.length) {
     if (searchCache.size > 60) searchCache.clear();
@@ -127,13 +128,25 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
   for (const disposable of installed) disposable.dispose();
   installed = [];
   const catalogs = new Map<string, { expires: number; value: Promise<VersionCatalogInfo[]> }>();
+  const gradleModels = new Map<string, { expires: number; value: Promise<GradleEditorState> }>();
   const loadCatalogs = (root: string) => {
     const cached = catalogs.get(root);
     if (cached && cached.expires > Date.now()) return cached.value;
-    const value = api.project.listDependencies(root).then(model => model.catalogs).catch(() => []);
+    const value = api.project.listDependencies(root).then(model => model.catalogs).catch(error => { catalogs.delete(root); throw error; });
     catalogs.set(root, { expires: Date.now() + 1500, value });
     return value;
   };
+  if (api.project.onGradleEditorModel) {
+    const remove = api.project.onGradleEditorModel(event => {
+      gradleModels.delete(event.root);
+      for (const model of monaco.editor.getModels()) {
+        if (buildFileKind(model.uri.fsPath) === "gradle" && workspaceRoot() === event.root) {
+          reportCompletionStatus(model.uri.fsPath, event.state === "ready" ? "ready" : event.state === "error" ? "sync-error" : "syncing", event.reason, "gradle");
+        }
+      }
+    });
+    installed.push({ dispose: remove });
+  }
 
   installed.push(monaco.editor.registerCommand(OPEN_ARTIFACT_PAGE_COMMAND, (_accessor, url: string) => {
     void api.app.openArtifactPage(String(url || "")).catch(() => undefined);
@@ -169,11 +182,36 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
           };
         };
 
+        let gradleState: GradleEditorState | null = null;
+        const activeRoot = workspaceRoot();
+        if (kind === "gradle" && activeRoot && api.project.gradleEditorModel) {
+          try {
+            let cached = gradleModels.get(activeRoot);
+            if (!cached || cached.expires < Date.now()) {
+              cached = { expires: Date.now() + 1500, value: api.project.gradleEditorModel(activeRoot) };
+              gradleModels.set(activeRoot, cached);
+            }
+            gradleState = await cached.value;
+            if (cancellation?.isCancellationRequested || model.isDisposed?.() || workspaceRoot() !== activeRoot || model.getValue() !== text) return { suggestions: [] };
+            reportCompletionStatus(model.uri.fsPath, gradleState.state === "ready" ? "ready" : gradleState.state === "error" ? "sync-error" : "syncing", gradleState.reason, "gradle");
+          } catch (error) {
+            reportCompletionStatus(model.uri.fsPath, "sync-error", error instanceof Error ? error.message : "", "gradle");
+          }
+        }
+
+        const configurations = gradleState?.model ? gradleProjectForFile(gradleState.model, model.uri.fsPath)?.configurations || [] : [];
         if (kind === "gradle") {
-          const accessor = gradleCatalogQueryAt(text, offset);
+          const task = gradleState?.model && gradleTaskSuggestions(gradleState.model, model.uri.fsPath, text, offset);
+          if (task) return { suggestions: toMonacoItems(monaco, task.suggestions, spanToRange(task)) };
+          const accessor = gradleCatalogQueryAt(text, offset, configurations);
           const root = workspaceRoot();
           if (accessor && root) {
-            const allCatalogs = await loadCatalogs(root);
+            let allCatalogs: VersionCatalogInfo[];
+            try { allCatalogs = await loadCatalogs(root); }
+            catch (error) {
+              reportCompletionStatus(model.uri.fsPath, "catalog-missing", error instanceof Error ? error.message : "", "catalog");
+              return { suggestions: [] };
+            }
             // Do not publish an answer into a different project or draft.
             if (cancellation?.isCancellationRequested || model.isDisposed?.() || workspaceRoot() !== root || model.getValue() !== text) return { suggestions: [] };
             const matchingCatalogs = allCatalogs.filter(entry => !accessor.catalog || entry.name === accessor.catalog);
@@ -188,7 +226,9 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
                   detail: version.version,
                 })),
               ]);
-              return { suggestions: members.filter(member => member.accessor.toLowerCase().startsWith(accessor.accessor.toLowerCase())).map(member => ({
+              const matchingMembers = members.filter(member => member.accessor.toLowerCase().startsWith(accessor.accessor.toLowerCase()));
+              reportCompletionStatus(model.uri.fsPath, matchingMembers.length ? "ready" : "no-matches", "", "catalog");
+              return { suggestions: matchingMembers.map(member => ({
                 label: member.accessor,
                 kind: monaco.languages.CompletionItemKind.Module,
                 detail: member.detail,
@@ -198,17 +238,18 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
                 sortText: `0-${member.accessor}`,
               })) };
             }
+            if (!accessor.catalog || accessor.catalog === "libs") reportCompletionStatus(model.uri.fsPath, "catalog-missing", "", "catalog");
           }
         }
 
-        const coordinate = coordinateQueryAt(text, offset, kind);
+        const coordinate = coordinateQueryAt(text, offset, kind, configurations);
         if (coordinate) {
           try {
             if (coordinate.field === "version") {
               const versions = await withTimeout(
                 api.project.dependencyVersions(coordinate.groupId, coordinate.artifactId),
-                [] as string[],
               );
+              reportCompletionStatus(model.uri.fsPath, versions.length ? "ready" : "no-matches", "", "sources");
               return {
                 suggestions: versions.slice(0, 40).map((version, index) => ({
                   label: version,
@@ -234,7 +275,8 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
                 ? `${coordinate.groupId} ${coordinate.term}`
                 : coordinate.term,
             );
-            const span = coordinateSpanAt(text, offset, kind);
+            reportCompletionStatus(model.uri.fsPath, candidates.length ? "ready" : "no-matches", "", "sources");
+            const span = coordinateSpanAt(text, offset, kind, configurations);
             const coordinateRange = span ? spanToRange(span) : range;
             return {
               suggestions: candidates.map((candidate, index) => {
@@ -274,17 +316,21 @@ export function installBuildFileCompletion(monaco: typeof MonacoEditor, api: Kiw
                 };
               }),
             };
-          } catch {
+          } catch (error) {
             // Maven Central is reached over the network; an offline editor must
             // still complete elements and blocks rather than report a failure.
+            reportCompletionStatus(model.uri.fsPath, error instanceof Error && error.message === "KIWI_COMPLETION_TIMEOUT" ? "timeout" : "source-unreachable", "", "sources");
             return { suggestions: [] };
           }
         }
 
+        reportCompletionStatus(model.uri.fsPath, "ready", "", "sources");
         const suggestions = kind === "maven"
           ? mavenCompletions(text, offset)
           : gradleCompletions(text, offset);
-        return { suggestions: toMonacoItems(monaco, suggestions, range) };
+        const dynamic = kind === "gradle" && gradleState?.model ? gradleModelSuggestions(gradleState.model, model.uri.fsPath, text, offset) : [];
+        const merged = [...dynamic, ...suggestions].filter((entry, index, rows) => rows.findIndex(other => other.label === entry.label) === index);
+        return { suggestions: toMonacoItems(monaco, merged, range), incomplete: gradleState?.state === "loading" };
       },
     }));
   }

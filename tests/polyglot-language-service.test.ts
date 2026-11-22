@@ -43,6 +43,14 @@ async function inspect(service: InstanceType<typeof PolyglotLanguageService>, do
 }
 
 describe("polyglot language servers over a real stdio connection", () => {
+  it("enables Kotlin build scripts and communicates the configuration over LSP", async () => {
+    const { service } = harness();
+    const document = payload("build.gradle.kts", "kotlin", 'plugins { java }');
+    await service.open(document);
+    const state = await inspect(service, document);
+    expect(state.initialization.initializationOptions.kotlin.scripts).toEqual({ enabled: true, buildScriptsEnabled: true });
+    expect(state.notifications.find((entry: any) => entry.method === "configuration").settings.kotlin.scripts.buildScriptsEnabled).toBe(true);
+  });
   it("initializes once, synchronizes UTF-16 edits, saves, requests completions and publishes diagnostics", async () => {
     const { service, events } = harness();
     const document = payload("main.py", "python", "name = '🐦'\nprint(name)\n");

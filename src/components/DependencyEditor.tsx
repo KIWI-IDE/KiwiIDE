@@ -6,7 +6,9 @@ import type {
   EditableDependency,
   VulnerabilityFinding,
   VulnerabilityReport,
+  DependencyAdvice,
 } from "../types";
+import { DependencyAdvicePanel } from "./DependencyAdvicePanel";
 import { t } from "../i18n";
 
 type Props = {
@@ -54,6 +56,8 @@ export function DependencyEditor({
   const [versions, setVersions] = useState<Record<string, string>>({});
   const [catalogVersions, setCatalogVersions] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
+  const [versionAdvice, setVersionAdvice] = useState<Record<string, { value: DependencyAdvice | null; checking: boolean; error: string; allow: boolean }>>({});
+  const adviceRequests = useRef(new Map<string, symbol>());
   const scanKey = JSON.stringify([
     workspaceRoot,
     model?.buildFiles,
@@ -61,6 +65,18 @@ export function DependencyEditor({
   ]);
   const currentScanKey = useRef(scanKey);
   currentScanKey.current = scanKey;
+  useEffect(() => { adviceRequests.current.clear(); setVersionAdvice({}); }, [scanKey]);
+  const checkVersions = async (dependency: EditableDependency, version?: string) => {
+    const expectedScan = scanKey;
+    const request = Symbol(); adviceRequests.current.set(dependency.id, request);
+    setVersionAdvice(current => ({ ...current, [dependency.id]: { value: current[dependency.id]?.value || null, checking: true, error: "", allow: current[dependency.id]?.allow || false } }));
+    try {
+      const value = await window.kiwi!.project.dependencyAdvice(workspaceRoot, dependency.groupId, dependency.artifactId, { buildFile: dependency.buildFile, version });
+      if (currentScanKey.current === expectedScan && adviceRequests.current.get(dependency.id) === request) setVersionAdvice(current => ({ ...current, [dependency.id]: { ...current[dependency.id], value, checking: false, error: "" } }));
+    } catch (error) {
+      if (adviceRequests.current.get(dependency.id) === request) setVersionAdvice(current => ({ ...current, [dependency.id]: { ...current[dependency.id], checking: false, error: String(error) } }));
+    }
+  };
   const scanRequest = useRef(0);
   // Hide an old answer immediately, including the render before effects run.
   const report = scanResult?.key === scanKey ? scanResult.report : null;
@@ -242,13 +258,14 @@ export function DependencyEditor({
                     </div>
                   </div>
                   <div className="dependency-editor-version">
+                    <button className="icon-button" disabled={Boolean(busy) || versionAdvice[dependency.id]?.checking} title={t("Passende Versionen prüfen")} aria-label={t("Passende Versionen prüfen")} onClick={() => void checkVersions(dependency)}><RefreshCw size={12} /></button>
                     <input
                       aria-label={`Version von ${dependency.coordinate}`}
                       value={version}
                       disabled={!dependency.editableVersion || busy === dependency.id}
                       onChange={(event) => setVersions((current) => ({ ...current, [dependency.id]: event.target.value }))}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter" && changed && version.trim()) {
+                        if (event.key === "Enter" && changed && version.trim() && !versionAdvice[dependency.id]?.checking && (versionAdvice[dependency.id]?.allow || !versionAdvice[dependency.id]?.value?.versions.some(entry => entry.version === version.trim() && entry.status === "incompatible"))) {
                           void mutate(dependency.id, () => onUpdate(dependency, version.trim()));
                         }
                       }}
@@ -257,7 +274,7 @@ export function DependencyEditor({
                       className="icon-button"
                       title={t("Version speichern")}
                       aria-label={`Version von ${dependency.coordinate} speichern`}
-                      disabled={!dependency.editableVersion || !changed || !version.trim() || Boolean(busy)}
+                      disabled={!dependency.editableVersion || !changed || !version.trim() || Boolean(busy) || versionAdvice[dependency.id]?.checking || (!versionAdvice[dependency.id]?.allow && versionAdvice[dependency.id]?.value?.versions.some(entry => entry.version === version.trim() && entry.status === "incompatible"))}
                       onClick={() => void mutate(dependency.id, () => onUpdate(dependency, version.trim()))}
                     ><Save size={12} /></button>
                     <button
@@ -269,6 +286,7 @@ export function DependencyEditor({
                     ><Trash2 size={12} /></button>
                   </div>
                   <small className="dependency-editor-source" title={dependency.sourceFile}>{dependency.sourceFile}</small>
+                  {versionAdvice[dependency.id] && <div className="dependency-editor-advice"><DependencyAdvicePanel advice={versionAdvice[dependency.id].value} version={version} checking={versionAdvice[dependency.id].checking} error={versionAdvice[dependency.id].error} allowIncompatible={versionAdvice[dependency.id].allow} onAllow={allow => setVersionAdvice(current => ({ ...current, [dependency.id]: { ...current[dependency.id], allow } }))} onPick={picked => setVersions(current => ({ ...current, [dependency.id]: picked }))} onCheck={() => void checkVersions(dependency, version)} /></div>}
                 </article>
               );
             })}

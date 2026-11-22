@@ -1,9 +1,15 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, safeStorage, session, shell } = require("electron");
 const fs = require("node:fs");
+const { revealStartupWindow } = require("./services/startup-window.cjs");
+const { GradleEditorService } = require("./services/gradle-editor-service.cjs");
+const { DependencyCompatibilityService } = require("./services/dependency-compatibility.cjs");
 const { prepareUnixUpdate, discardUnixUpdate } = require("./services/unix-update-service.cjs");
 const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
 const path = require("node:path");
+const { ApplicationIconService } = require("./services/application-icon.cjs");
+const applicationIcons = new ApplicationIconService(nativeImage, app, BrowserWindow,
+  path.join(__dirname, "..", "assets", "icons", "kiwi-512.png"), path.join(app.getPath("userData"), "accent-icons"));
 const { spawn } = require("node:child_process");
 const { PathGuard } = require("./services/path-guard.cjs");
 const { DiscordPresenceService } = require("./services/discord-presence-service.cjs");
@@ -178,46 +184,15 @@ let welcomeWindow;
 let settingsWindow;
 let splashWindow;
 let splashStartedAt = 0;
-/**
- * How long the splash stays up, and what it does with the time.
- *
- * Not a pause: the work below is work the first minutes of a session
- * would otherwise spend anyway — probing JDKs, reading the project, asking
- * Gradle what tasks exist. Doing it here means the workbench opens onto a
- * build tool window that is already filled rather than one that spends
- * those seconds saying it has no tasks.
- *
- * KIWI_SPLASH_MINIMUM_MS overrides it. The end-to-end gate sets it low:
- * three runs waiting fifteen seconds each on a splash they do not examine
- * is three quarters of a minute spent proving nothing. The preload itself
- * still runs there, so a step that throws is still caught.
- */
+/** Optional minimum for previews and tests; normal startup has no artificial delay. */
 const SPLASH_MINIMUM_MS = (() => {
   // An empty variable is not a zero: Number("") is 0 and would silently
   // switch the splash off for anybody who exported the name and no value.
   const configured = String(process.env.KIWI_SPLASH_MINIMUM_MS || "").trim();
   const parsed = Number(configured);
-  return configured && Number.isFinite(parsed) ? Math.max(0, parsed) : 15_000;
+  return configured && Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 })();
-/**
- * And the point at which it stops waiting for that work.
- *
- * A Gradle build that cannot configure, a wrapper downloading itself over
- * a slow line: the preload has its own bound so a build nobody can fix
- * from the splash cannot keep the IDE from opening at all.
- */
-const SPLASH_PRELOAD_LIMIT_MS = 90_000;
-/**
- * Whether the startup preload runs at all.
- *
- * Off in the gates. Its steps spawn processes — a `java -version` per JDK
- * candidate, a Gradle configuration phase, the language server — and doing
- * that while a smoke run is driving the workbench made the runs less
- * reliable than they were: the end-to-end gate failed twice in two
- * different places, and the layout gate once, against runs that had been
- * green. A gate that fails at random is worse than one that covers a
- * little less, and this is measured in the running IDE instead.
- */
+/** Optional background warming, started after the first window is shown. */
 const STARTUP_PRELOAD = String(process.env.KIWI_STARTUP_PRELOAD || "").trim() !== "0";
 let splashPreload = Promise.resolve();
 let splashPreloadStarted = false;
@@ -491,6 +466,7 @@ function createStartupSplash() {
     try { stylesheet = fs.readFileSync(path.join(__dirname, "..", "src", "styles.css"), "utf8"); } catch { /* Renderer not built yet. */ }
   }
   const appearance = splashAppearance(stylesheet, appearanceSettings);
+  applicationIcons.apply(appearanceSettings.accentColor);
   const iconPath = path.join(__dirname, "..", "assets", "icons", "kiwi-256.png");
   const iconData = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath).toDataURL() : "";
   splashStartedAt = Date.now();
@@ -508,6 +484,7 @@ function createStartupSplash() {
     alwaysOnTop: true,
     center: true,
     backgroundColor: "#262b35",
+    icon: applicationIcons.get(appearanceSettings.accentColor) || undefined,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -661,36 +638,7 @@ function reportToSplash(step, index, total, expectedMs = 600) {
   })()`).catch(() => undefined);
 }
 
-/** What is left of the time the splash is up for regardless. */
-function splashTimeLeft() {
-  return Math.max(0, SPLASH_MINIMUM_MS - (Date.now() - splashStartedAt));
-}
-
-/**
- * The work the first minutes of a session would do anyway, done up front.
- *
- * Every step here is something the workbench asks for as soon as it opens, and
- * each is slow for its own reason: probing a JDK runs `java -version`, reading
- * a project walks its build files, and asking Gradle for its task list costs a
- * full configuration phase — seven seconds on a build of five empty modules,
- * far more on a real one. Doing that while the splash is up trades a wait
- * nobody can see for one somebody is already watching, and the answers are
- * kept, so the workbench opens onto a build tool window that is already
- * filled rather than one that spends those seconds saying it has no tasks.
- *
- * A step marked `untilSplashEnds` is started but waited for only as long as
- * the splash is up anyway. The language server and the symbol index are both:
- * either can take a minute on a large project, and holding the workbench for
- * them would turn a head start into a delay. They keep running, and the
- * renderer's own calls join the run in progress rather than beginning a
- * second one.
- *
- * The durations are for the bar alone. They are guesses, they are allowed to
- * be wrong, and nothing waits on them.
- *
- * Nothing here may throw: a step that fails costs its own speed-up and nothing
- * else, because everything it does is also done on demand later.
- */
+/** Warm independent services in the background after the window is visible. */
 async function prewarmStartup() {
   const state = services.workspaceState.snapshot();
   const active = state.activeRoot && fs.existsSync(state.activeRoot) ? state.activeRoot : "";
@@ -715,13 +663,11 @@ async function prewarmStartup() {
       {
         label: "Sprachserver wird gestartet",
         expected: 5_000,
-        untilSplashEnds: true,
         run: () => javaProject ? services.language.start(active) : services.polyglot.status(active),
       },
       {
         label: "Symbole werden indiziert",
         expected: 6_000,
-        untilSplashEnds: true,
         run: () => services.projectIndex.build(active),
       },
     ] : []),
@@ -737,59 +683,23 @@ async function prewarmStartup() {
         // step that always costs its time and never buys anything.
         console.error("[Start] " + step.label + " fehlgeschlagen:", error?.message || error);
       });
-    if (step.untilSplashEnds) {
-      await Promise.race([work, new Promise((resolve) => setTimeout(resolve, splashTimeLeft()))]);
-    } else {
-      await work;
-    }
+    await work;
+    if (shutdownStarted) return;
     console.log("[Start] " + step.label + ": " + (Date.now() - started) + " ms");
   }
   reportToSplash("Bereit", steps.length, steps.length, 300);
 }
 
 function showWindowAfterSplash(browserWindow) {
-  const finish = () => {
-    if (!browserWindow.isDestroyed()) browserWindow.show();
-    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy();
-  };
-  if (!splashWindow || splashWindow.isDestroyed()) {
-    finish();
-    return;
-  }
-  /*
-   * The preload starts here, once the window is built.
-   *
-   * Started beside the window instead, it competed with it: probing JDKs
-   * spawns a `java -version` for each candidate, and doing that while the
-   * renderer is still loading made the workbench arrive slower and less
-   * reliably than before any of this existed — the end-to-end gate failed
-   * twice, in two different places, against a run that had been green.
-   * Nothing is lost by waiting: the splash is up for fifteen seconds either
-   * way, and the window needs about three of them.
-   */
-  // Once. Two windows built while the splash is still up would otherwise
-  // each start their own run of it.
-  if (STARTUP_PRELOAD && !splashPreloadStarted) {
-    splashPreloadStarted = true;
-    splashPreload = prewarmStartup().catch(() => undefined);
-  }
-  /*
-   * The splash stays for its minimum and for as long as the preload runs.
-   *
-   * Both, not either: finishing early would cut short a splash somebody was
-   * told to expect, and waiting only on the clock would hand over a workbench
-   * whose build tool window is still empty. The preload carries its own limit,
-   * so a Gradle build that cannot configure delays the workbench by that much
-   * and no more.
-   */
-  const held = Promise.race([
-    splashPreload,
-    new Promise((resolve) => setTimeout(resolve, SPLASH_PRELOAD_LIMIT_MS)),
-  ]);
-  void held.then(() => {
-    const remaining = Math.max(0, SPLASH_MINIMUM_MS - (Date.now() - splashStartedAt));
-    if (remaining === 0) finish();
-    else setTimeout(finish, remaining);
+  revealStartupWindow({
+    window: browserWindow, splash: splashWindow,
+    startedAt: splashStartedAt, minimumMs: SPLASH_MINIMUM_MS,
+    background: () => {
+      if (!STARTUP_PRELOAD || splashPreloadStarted || shutdownStarted) return;
+      splashPreloadStarted = true;
+      splashPreload = prewarmStartup().catch(() => undefined);
+      return splashPreload;
+    },
   });
 }
 
@@ -926,7 +836,7 @@ function createWindow(kind, replaceOther = false, context = {}) {
     return current;
   }
 
-  const icon = path.join(__dirname, "..", "assets", "icons", "kiwi-256.png");
+  const icon = applicationIcons.get(services.settings.get().accentColor);
   const isEditor = kind === "editor";
   const isSettings = kind === "settings";
   const terminalContext = isTerminal ? {
@@ -943,7 +853,7 @@ function createWindow(kind, replaceOther = false, context = {}) {
     frame: false,
     backgroundColor: "#091216",
     title: shape.title,
-    icon: fs.existsSync(icon) ? icon : undefined,
+    icon: icon || undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -952,6 +862,7 @@ function createWindow(kind, replaceOther = false, context = {}) {
     },
   });
   const browserContentsId = browserWindow.webContents.id;
+  applicationIcons.apply(services.settings.get().accentColor);
   // The developer tools came with the default menu that is now gone. They stay
   // reachable on the chord everyone expects, and nothing else does.
   browserWindow.webContents.on("before-input-event", (_event, input) => {
@@ -1153,7 +1064,14 @@ async function createServices() {
       }
     }, 3_000);
   }
-  const polyglot = new PolyglotLanguageService(guard, () => settings.get(), send, { managedRoot: managedLanguageServers });
+  const polyglot = new PolyglotLanguageService(guard, () => settings.get(), send, {
+    managedRoot: managedLanguageServers,
+    kotlinEnvironment: async root => {
+      const jdk = await projects.detectJdk(root);
+      const gradle = projects.toolPath("gradle");
+      return { ...(jdk.available ? { JAVA_HOME: jdk.path } : {}), PATH: [jdk.available ? path.join(jdk.path, "bin") : "", gradle ? path.dirname(gradle) : "", process.env.PATH || ""].filter(Boolean).join(path.delimiter) };
+    },
+  });
   const polyglotProjects = new PolyglotProjectService(guard, { send, settings, toolchainRoot });
   const breakpoints = new BreakpointService(guard);
   const templates = new TemplateService(guard);
@@ -1175,6 +1093,8 @@ async function createServices() {
   const javaRefactor = new JavaRefactorService(guard, workspace, modules, language);
   const workflow = new WorkflowService(guard);
   const dependencies = new DependencyService(guard, projects);
+  const gradleEditor = new GradleEditorService(guard, projects, builds, dependencies, broadcast);
+  const dependencyCompatibility = new DependencyCompatibilityService(guard, projects, dependencies);
   const systemFonts = new SystemFontService();
   // An applied renderer update is the version Kiwi is actually running, so it
   // is also the version the next check compares against — otherwise the same
@@ -1228,7 +1148,7 @@ async function createServices() {
     joinSecret: settings.get().discordJoinSecret,
   });
   app.setAccessibilitySupportEnabled(Boolean(settings.get().screenReaderMode));
-  return { guard, settings, workspaceState, sessionStore, editorStates, workspace, projects, modules, runConfigurations, builds, cacheRecovery, git, githubAuth, tests, terminal, tailer, debug, breakpoints, templates, projectIndex, bytecode, language, polyglot, polyglotProjects, managedLanguageServers, javaRefactor, workflow, dependencies, systemFonts, updates, httpClient, discord, vulnerabilities, deployments, downloadedJdkRoot };
+  return { guard, settings, workspaceState, sessionStore, editorStates, workspace, projects, modules, runConfigurations, builds, cacheRecovery, git, githubAuth, tests, terminal, tailer, debug, breakpoints, templates, projectIndex, bytecode, language, polyglot, polyglotProjects, managedLanguageServers, javaRefactor, workflow, dependencies, gradleEditor, dependencyCompatibility, systemFonts, updates, httpClient, discord, vulnerabilities, deployments, downloadedJdkRoot };
 }
 
 /** The settings the Discord card is built from. */
@@ -2053,6 +1973,7 @@ function registerIpc() {
 
   ipcMain.handle("settings:update", async (event, patch) => {
     const next = await settings.update(patch);
+    if ("accentColor" in patch) applicationIcons.apply(next.accentColor);
     if ("languageServers" in patch) await polyglot.stop();
     app.setAccessibilitySupportEnabled(Boolean(next.screenReaderMode));
     workspace.invalidate();
@@ -2142,6 +2063,7 @@ function registerIpc() {
   });
   ipcMain.handle("settings:reset", async (event) => {
     const next = await settings.reset();
+    applicationIcons.apply(next.accentColor);
     app.setAccessibilitySupportEnabled(Boolean(next.screenReaderMode));
     workspace.invalidate();
     broadcast("settings:changed", { settings: next, patch: next });
@@ -2332,6 +2254,8 @@ function registerIpc() {
     amend: Boolean(payload.amend),
   }));
   ipcMain.handle("dependencies:search", (_event, payload) => dependencies.search(payload.query, payload.limit, payload.sourceId));
+  ipcMain.handle("gradle:editorModel", (_event, payload) => services.gradleEditor.get(payload.root, Boolean(payload.refresh)));
+  ipcMain.handle("dependencies:advice", (_event, payload) => services.dependencyCompatibility.advise(payload.root, payload.groupId, payload.artifactId, payload.options || {}));
   ipcMain.handle("dependencies:versions", (_event, payload) => dependencies.versions(payload.groupId, payload.artifactId, 40, payload.sourceId));
   ipcMain.handle("dependencies:list", (_event, root) => dependencies.list(root));
   ipcMain.handle("dependencies:add", (_event, payload) => dependencies.add(payload.root, payload.coordinates, payload.scope, payload.options));
@@ -2776,6 +2700,7 @@ app.on("before-quit", (event) => {
   closeSettingsWindow();
   void (async () => {
     services.workspace.dispose();
+    await services.gradleEditor.shutdown();
     services.builds.stop();
     services.terminal.stop();
     services.tailer.stop();

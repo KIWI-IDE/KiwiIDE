@@ -1,6 +1,7 @@
 import type * as Monaco from "monaco-editor";
 import type { KiwiApi } from "../types";
 import { monacoCompletionKind } from "./completion-kinds";
+import { reportCompletionStatus } from "./completion-status";
 import { isPolyglotLanguage, languageDisplayName, polyglotLanguages, sourceLanguage } from "./language-catalog";
 
 type MonacoApi = typeof import("monaco-editor");
@@ -367,8 +368,10 @@ export function registerPolyglotLanguageProviders(
       if (!state.available) {
         if (state.lastAttempt && Date.now() - state.lastAttempt < 3_000) return false;
         state.lastAttempt = Date.now();
+        reportCompletionStatus(state.model.uri.fsPath, "server-starting", "", "server");
         const result = await bridge.open({ root: state.root, file: state.model.uri.fsPath, text, languageId: state.languageId });
         state.available = Boolean(result.available);
+        reportCompletionStatus(state.model.uri.fsPath, result.available ? "ready" : result.status === "missing" || result.status === "disabled" ? "server-missing" : "server-error", result.reason || "", "server");
         if (state.available) state.syncedVersion = version;
       } else if (version !== state.syncedVersion) {
         const changed = await bridge.change({ root: state.root, file: state.model.uri.fsPath, text });
@@ -376,7 +379,7 @@ export function registerPolyglotLanguageProviders(
         else { state.available = false; state.lastAttempt = 0; }
       }
       return state.available;
-    }).catch(() => { state.available = false; return false; });
+    }).catch(() => { state.available = false; reportCompletionStatus(state.model.uri.fsPath, "server-error", "", "server"); return false; });
     return state.queue;
   };
 

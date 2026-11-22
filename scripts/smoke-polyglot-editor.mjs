@@ -17,9 +17,15 @@ const project = path.join(fixture, "hybrid");
 const userData = path.join(fixture, "userdata");
 const screenshotsOnly = process.argv.includes("--screenshots-only");
 const capture = screenshotsOnly || process.argv.includes("--capture");
-const gradleOnly = process.argv.includes("--gradle-only");
+const gradleModelOnly = process.argv.includes("--gradle-model-only");
+const pythonSyntaxOnly = process.argv.includes("--python-syntax-only");
+const gradleOnly = process.argv.includes("--gradle-only") || gradleModelOnly;
 const gradleScript = gradleOnly ? await fs.readFile(path.join(root, "tests", "fixtures", "catalog-build.gradle.kts"), "utf8") : "";
-const cases = gradleOnly ? [
+const cases = pythonSyntaxOnly ? [
+  ["main.py", "python", await fs.readFile(path.join(root, "tests", "fixtures", "python-game-ui.py"), "utf8"), null],
+] : gradleModelOnly ? [
+  ["model.gradle.kts", "kotlin", "extensions.configure<DemoExtension> {\n    gre", "greeting"],
+] : gradleOnly ? [
   ["build.gradle.kts", "kotlin", `${gradleScript}\ndependencies {\n    compileOnly(libs.pa`, "libs.paperSpigot"],
   ["aliases.gradle.kts", "kotlin", `${gradleScript}\ndependencies {\n    compileOnly(libs.fastAsyncWorldEdit`, "libs.fastAsyncWorldEditBukkit"],
 ] : [
@@ -119,6 +125,10 @@ if (gradleOnly) {
   await fs.writeFile(path.join(project, ".kiwi", "project.json"), JSON.stringify({ autoSyncBuild: false, gradleOffline: true }));
   await fs.mkdir(path.join(project, "gradle"), { recursive: true });
   await fs.writeFile(path.join(project, "gradle.properties"), "org.gradle.daemon=false\norg.gradle.java.installations.auto-download=false\n");
+  if (gradleModelOnly) {
+    await fs.writeFile(path.join(project, "settings.gradle.kts"), 'rootProject.name = "gradle-editor-model"\n');
+    await fs.writeFile(path.join(project, "build.gradle.kts"), 'plugins { java }\nopen class DemoExtension { var greeting: String = "hello"; fun greet(name: String) {} }\nextensions.create<DemoExtension>("demoFeature")\n');
+  }
   await fs.writeFile(path.join(project, "gradle", "libs.versions.toml"), '[versions]\npaper = "test-version"\n[libraries]\npaperSpigot = { module = "io.papermc.paper:paper-api", version.ref = "paper" }\nfastAsyncWorldEditBukkit = "com.example:worldedit-bukkit:test-version"\nfastAsyncWorldEditCore = "com.example:worldedit-core:test-version"\n');
 }
 await Promise.all(cases.map(([file, _language, content]) => fs.writeFile(path.join(project, file), content)));
@@ -155,6 +165,13 @@ try {
   const cdp = await windowFor("editor");
   await cdp.send("Page.bringToFront");
   await until(() => evaluate(cdp, "Boolean(document.querySelector('.workspace-project-tree.active'))"), 30_000, "project tree");
+  if (gradleModelOnly) {
+    await until(async () => {
+      const state = await evaluate(cdp, `window.kiwi.project.gradleEditorModel(${JSON.stringify(project)})`, true);
+      if (state.state === 'error') throw new Error(state.reason);
+      return state.state === 'ready';
+    }, 120_000, 'imported Gradle plugin model');
+  }
 
   for (const [name, language, _content, expected] of cases.filter((item) => !screenshotsOnly || item[1] === "python")) {
     const file = path.join(project, name);
@@ -166,6 +183,40 @@ try {
     })()`), 12_000, `Explorer row ${name}`);
     await until(() => evaluate(cdp, `Boolean(document.querySelector('.tab.active[data-file-path="' + CSS.escape(${JSON.stringify(file)}) + '"]'))`), 12_000, `active tab ${name}`);
     await until(() => evaluate(cdp, `Boolean(document.querySelector('[data-mode-id="${language}"] .monaco-editor textarea'))`), 20_000, `Monaco language ${language}`);
+    if (pythonSyntaxOnly) {
+      const errorCount = () => evaluate(cdp, 'Number(document.querySelector(".statusbar > div:first-child > button:last-child").textContent.trim())');
+      await new Promise(resolve => setTimeout(resolve, 400));
+      assert.equal(await errorCount(), 0, "Valid multiline Python calls produced errors");
+      assert.equal(await evaluate(cdp, 'document.querySelectorAll(".monaco-editor .squiggly-error").length'), 0);
+      const replace = async (content) => {
+        await evaluate(cdp, 'document.querySelector("[data-mode-id=python] .monaco-editor textarea").focus()');
+        await press(cdp, "a", "KeyA", 65, 2);
+        await evaluate(cdp, `(() => {
+          const clipboardData = new DataTransfer();
+          clipboardData.setData('text/plain', ${JSON.stringify(content)});
+          document.querySelector('[data-mode-id=python] .monaco-editor textarea').dispatchEvent(new ClipboardEvent('paste', {clipboardData, bubbles:true, cancelable:true}));
+        })()`);
+      };
+      await replace('if True\n    pass\n');
+      await until(async () => (await errorCount()) > 0, 10_000, 'genuine Python error markers');
+      await replace(_content);
+      await press(cdp, "s", "KeyS", 83, 2);
+      await until(async () => (await fs.readFile(file, "utf8")) === _content, 10_000, 'restored Python buffer');
+      await until(async () => (await errorCount()) === 0, 10_000, 'cleared Python error markers');
+      await until(() => evaluate(cdp, 'Boolean(document.querySelector(".completion-status-control > button"))'), 10_000, 'completion help');
+      await evaluate(cdp, 'document.querySelector(".completion-status-control > button").click()');
+      const help = await evaluate(cdp, `(() => {
+        const popup = document.querySelector('.completion-status-popover');
+        const rect = popup.getBoundingClientRect();
+        return {text:popup.textContent, fits:rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight};
+      })()`);
+      assert(help.fits, 'Completion help did not fit inside the window');
+      assert.match(help.text, /Sprachserver|language server/i);
+      if (capture) {
+        const shot = await cdp.send('Page.captureScreenshot', {format:'png', captureBeyondViewport:false});
+        await fs.writeFile(path.join(root, '.kiwi', 'python-diagnostics.png'), Buffer.from(shot.data, 'base64'));
+      }
+    }
     if (!expected) continue;
     await evaluate(cdp, `document.querySelector('[data-mode-id="${language}"] .monaco-editor textarea')?.focus()`);
     await press(cdp, "End", "End", 35, 2);
@@ -190,7 +241,7 @@ try {
     }
     await press(cdp, "Escape", "Escape", 27);
   }
-  if (capture) {
+  if (capture && !pythonSyntaxOnly) {
     await evaluate(cdp, `window.kiwi.app.openSettings(${JSON.stringify(project)})`, true);
     const settings = await windowFor("settings");
     await settings.send("Page.bringToFront");
@@ -205,8 +256,19 @@ try {
   }
   const health = await evaluate(cdp, "window.kiwi.app.health()", true);
   if (!gradleOnly) assert.equal(health.language.sessions, 0, "A non-Java project must not start JDT LS.");
-  console.log(gradleOnly ? "Gradle Kotlin completion passed: reported script, live catalog aliases, visible suggestions and accepted edits." : screenshotsOnly ? "Hybrid editor screenshots saved: .kiwi/polyglot-editor.png and .kiwi/polyglot-settings.png." : `Hybrid editor smoke passed: ${cases.length} file languages, all 11 native families, local completions and web workers.`);
+  console.log(pythonSyntaxOnly ? "Python diagnostics passed: multiline calls accepted, real syntax errors marked, repaired markers cleared, completion help visible." : gradleOnly ? "Gradle Kotlin completion passed: reported script, live catalog aliases, visible suggestions and accepted edits." : screenshotsOnly ? "Hybrid editor screenshots saved: .kiwi/polyglot-editor.png and .kiwi/polyglot-settings.png." : `Hybrid editor smoke passed: ${cases.length} file languages, all 11 native families, local completions and web workers.`);
 } catch (error) {
+  if (pythonSyntaxOnly) {
+    console.error('Python buffer at failure:', await fs.readFile(path.join(project, 'main.py'), 'utf8').catch(() => 'unavailable'));
+    try {
+      const target = (await targets()).find(item => item.type === 'page' && item.url.includes('window=editor'));
+      const debug = await connect(target.webSocketDebuggerUrl);
+      console.error('Editor at failure:', await evaluate(debug, 'JSON.stringify({status:document.querySelector(".statusbar")?.textContent,lines:[...document.querySelectorAll(".view-lines .view-line")].map(line=>line.textContent)})'));
+      const screenshot = await debug.send('Page.captureScreenshot', {format:'png'});
+      await fs.writeFile(path.join(root, '.kiwi', 'python-diagnostics-failure.png'), Buffer.from(screenshot.data,'base64'));
+      debug.close();
+    } catch { /* Report the original failure. */ }
+  }
   throw new Error(`${error.message}\n--- Kiwi output ---\n${logs.slice(-4_000)}`);
 } finally {
   try {

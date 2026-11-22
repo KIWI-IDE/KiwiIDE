@@ -204,6 +204,8 @@ class PolyglotSession {
     });
     const serverSettings = this.configuration.server.id === "python"
       ? { python: { analysis: { autoSearchPaths: true, useLibraryCodeForTypes: true, typeCheckingMode: "standard" } } }
+      : this.configuration.server.id === "kotlin"
+        ? { kotlin: { scripts: { enabled: true, buildScriptsEnabled: true }, completion: { snippets: { enabled: true } }, diagnostics: { enabled: true } } }
       : {};
     const initializationOptions = { ...serverSettings };
     if (this.configuration.server.id === "php") {
@@ -330,6 +332,7 @@ class PolyglotLanguageService {
     this.spawnImpl = options.spawnImpl || spawn;
     this.terminateImpl = options.terminateImpl || terminateProcessTree;
     this.findExecutable = options.findExecutable || findExecutable;
+    this.kotlinEnvironment = options.kotlinEnvironment || (async () => ({}));
     this.initializeTimeoutMs = options.initializeTimeoutMs || 30_000;
     this.requestTimeoutMs = options.requestTimeoutMs || 15_000;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs || 1_500;
@@ -379,7 +382,7 @@ class PolyglotLanguageService {
       env: this.env,
       searchPaths: [...this.searchPaths, ...(this.managedRoot ? [path.join(this.managedRoot, "node_modules", ".bin")] : [])],
     });
-    return command ? { command, args } : null;
+    return command ? { command, args, ...(configuration.server.id === "kotlin" && root ? { env: await this.kotlinEnvironment(root) } : {}) } : null;
   }
 
   async status(root) {

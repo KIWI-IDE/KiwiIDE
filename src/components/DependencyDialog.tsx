@@ -1,6 +1,7 @@
 import { CircleAlert, ExternalLink, Loader, Package, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AddDependencyOptions, VersionCatalogInfo } from "../types";
+import type { AddDependencyOptions, VersionCatalogInfo, DependencyAdvice, DependencyAdviceOptions } from "../types";
+import { DependencyAdvicePanel } from "./DependencyAdvicePanel";
 import { buildFileLabel, mvnRepositoryUrl } from "../language/build-files";
 import { t } from "../i18n";
 import repositories from "../../electron/services/dependency-repositories.json";
@@ -74,6 +75,7 @@ export function DependencyDialog({
   buildType,
   onSearch,
   onVersions,
+  onAdvice,
   onAdd,
   onClose,
   buildFiles = [],
@@ -84,6 +86,7 @@ export function DependencyDialog({
   buildType: string;
   onSearch: (query: string, sourceId?: string) => Promise<DependencyCandidate[]>;
   onVersions: (groupId: string, artifactId: string, sourceId?: string) => Promise<string[]>;
+  onAdvice?: (groupId: string, artifactId: string, options: DependencyAdviceOptions) => Promise<DependencyAdvice>;
   onAdd: (coordinates: { groupId: string; artifactId: string; version: string }, scope: string, options?: AddDependencyOptions) => Promise<void>;
   onClose: () => void;
   buildFiles?: string[];
@@ -100,6 +103,12 @@ export function DependencyDialog({
   const [selected, setSelected] = useState<DependencyCandidate | null>(null);
   const [versions, setVersions] = useState<string[]>([]);
   const [version, setVersion] = useState("");
+  const [advice, setAdvice] = useState<DependencyAdvice | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [adviceError, setAdviceError] = useState("");
+  const [versionError, setVersionError] = useState("");
+  const [allowIncompatible, setAllowIncompatible] = useState(false);
+  const adviceEpoch = useRef(0);
   const [scope, setScope] = useState(gradle ? "implementation" : "compile");
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
@@ -142,6 +151,32 @@ export function DependencyDialog({
 
   const intent = useMemo(() => dependencyQueryIntent(query), [query]);
   const pasted = intent.coordinate;
+  const adviceGroup = selected?.groupId || pasted?.groupId || "";
+  const adviceArtifact = selected?.artifactId || pasted?.artifactId || "";
+  const adviceSource = selected?.sourceId || sourceId;
+  useEffect(() => {
+    const epoch = ++adviceEpoch.current;
+    setAdvice(null); setAdviceError(""); setAllowIncompatible(false);
+    if (!onAdvice || !adviceGroup || !adviceArtifact) { setChecking(false); return; }
+    setChecking(true);
+    void onAdvice(adviceGroup, adviceArtifact, { sourceId: adviceSource || undefined, buildFile: buildFile || undefined, ...(pasted ? { version: pasted.version } : {}) })
+      .then(value => { if (adviceEpoch.current === epoch) setAdvice(value); })
+      .catch(reason => { if (adviceEpoch.current === epoch) setAdviceError(String(reason)); })
+      .finally(() => { if (adviceEpoch.current === epoch) setChecking(false); });
+    return () => { adviceEpoch.current += 1; };
+  }, [onAdvice, adviceGroup, adviceArtifact, adviceSource, buildFile, pasted?.version]);
+
+  const checkSelectedVersion = async () => {
+    const picked = selected ? version : pasted?.version;
+    if (!onAdvice || !picked || !adviceGroup || !adviceArtifact) return;
+    const epoch = ++adviceEpoch.current;
+    setChecking(true); setAdviceError("");
+    try {
+      const value = await onAdvice(adviceGroup, adviceArtifact, { sourceId: adviceSource || undefined, buildFile: buildFile || undefined, version: picked });
+      if (adviceEpoch.current === epoch) setAdvice(current => ({ ...value, recommendedVersion: current?.recommendedVersion || value.recommendedVersion, versions: [...value.versions, ...(current?.versions || []).filter(entry => !value.versions.some(next => next.version === entry.version))] }));
+    } catch (reason) { if (adviceEpoch.current === epoch) setAdviceError(String(reason)); }
+    finally { if (adviceEpoch.current === epoch) setChecking(false); }
+  };
 
   useEffect(() => {
     const text = intent.search;
@@ -183,6 +218,7 @@ export function DependencyDialog({
     setSelected(candidate);
     setVersion(candidate.version);
     setVersions([candidate.version]);
+    setVersionError("");
     try {
       const published = await onVersions(candidate.groupId, candidate.artifactId, candidate.sourceId);
       // Walking the list with the arrow keys asks for one of these per result,
@@ -194,6 +230,7 @@ export function DependencyDialog({
       }
     } catch {
       // The latest version from the search result is enough to continue with.
+      if (requestedRef.current === coordinate) setVersionError(t("Versionliste nicht erreichbar. Die gefundene Version kann weiterhin verwendet werden."));
     }
   };
 
@@ -227,7 +264,7 @@ export function DependencyDialog({
       : null;
 
   const add = async () => {
-    if (!target) return;
+    if (!target || checking || (!allowIncompatible && advice?.versions.some(entry => entry.version === target.version && entry.status === "incompatible"))) return;
     setBusy(true);
     setError("");
     try {
@@ -345,6 +382,11 @@ export function DependencyDialog({
         )}
 
         {error && <p className="dependency-error"><CircleAlert size={13} /> {error}</p>}
+        {versionError && <p className="dependency-error">{versionError}</p>}
+        {onAdvice && target && <DependencyAdvicePanel advice={advice} version={target.version} checking={checking} error={adviceError} allowIncompatible={allowIncompatible} onAllow={setAllowIncompatible} onPick={value => {
+          if (selected) { setVersion(value); setVersions(current => [...new Set([value, ...current])]); }
+          else setQuery(`${target.groupId}:${target.artifactId}:${value}`);
+        }} onCheck={() => void checkSelectedVersion()} />}
 
         {(buildFiles.length > 0 || (gradle && catalogs.length > 0)) && (
           <div className="dependency-target-options">
@@ -383,7 +425,7 @@ export function DependencyDialog({
         <footer>
           {selected && (
             <select value={version} onChange={(event) => setVersion(event.target.value)} aria-label={t("Version")} title={version}>
-              {versions.map((entry) => <option key={entry} value={entry}>{entry}</option>)}
+              {versions.map((entry) => <option key={entry} value={entry} disabled={!allowIncompatible && advice?.versions.some(report => report.version === entry && report.status === "incompatible")}>{entry}{advice?.recommendedVersion === entry ? ` · ${t("Empfohlen")}` : advice?.versions.some(report => report.version === entry && report.status === "incompatible") ? ` · ${t("Nicht passend")}` : ""}</option>)}
             </select>
           )}
           <select value={scope} onChange={(event) => setScope(event.target.value)} aria-label={gradle ? "Konfiguration" : "Scope"}>
@@ -396,7 +438,7 @@ export function DependencyDialog({
                 : t("Einen Treffer auswählen — oder die vollständige Koordinate einfügen.")}
             </small>
           )}
-          <button className="primary-button" disabled={!target || busy} onClick={() => void add()}>
+          <button className="primary-button" disabled={!target || busy || checking || (!allowIncompatible && advice?.versions.some(entry => entry.version === target?.version && entry.status === "incompatible"))} onClick={() => void add()}>
             {busy ? "Wird eingetragen…" : "Hinzufügen"}
           </button>
         </footer>

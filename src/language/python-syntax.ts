@@ -1,3 +1,5 @@
+import { pythonLogicalLines, pythonHeaderColon } from "./python-logical-lines";
+
 /**
  * An immediate structural check for Python sources.
  *
@@ -59,7 +61,7 @@ function extractCompoundKeyword(lineText: string): string {
 export function findPythonSyntaxProblems(source: string): PythonSyntaxProblem[] {
   const problems: PythonSyntaxProblem[] = [];
   const text = String(source || "");
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r\n|\r|\n/);
 
   // 1. First pass: character scanning for string literals, comments, f-strings, and bracket matching.
   const bracketStack: Array<{ char: string; line: number; column: number }> = [];
@@ -333,7 +335,7 @@ export function findPythonSyntaxProblems(source: string): PythonSyntaxProblem[] 
       index += 1;
       continue;
     }
-    if (ch === "+" && next === "+") {
+    if (ch === "+" && next === "+" && /[\w)\]]/.test(text[index - 1] || "") && /^\+\+[ \t]*(?:#.*)?(?:\r?\n|$)/.test(text.slice(index))) {
       problems.push({
         line,
         column,
@@ -389,122 +391,11 @@ export function findPythonSyntaxProblems(source: string): PythonSyntaxProblem[] 
   let expectIndentAfter: { line: number; keyword: string } | null = null;
   const blockStack: Array<{ type: "def" | "loop" | "class" | "other"; indent: number }> = [];
 
-  let inMultilineString = false;
-  let multilineQuote = "";
-  let insideParentheses = 0;
-
-  for (let lineIdx = 0; lineIdx < lines.length; lineIdx += 1) {
-    const lineNum = lineIdx + 1;
-    const rawLine = lines[lineIdx];
-
-    // Check for trailing backslash with whitespace error
-    const trailingBackslashMatch = rawLine.match(/\\\s+$/);
-    if (trailingBackslashMatch && trailingBackslashMatch.index !== undefined) {
-      problems.push({
-        line: lineNum,
-        column: trailingBackslashMatch.index + 1,
-        length: trailingBackslashMatch[0].length,
-        kind: "invalid-syntax",
-        message: "Nach dem Zeilenfortsetzungszeichen „\\“ darf kein Leerzeichen stehen.",
-        severity: "error",
-      });
-    }
-
-    // Calculate line indentation (spaces = 1, tabs = 4)
-    let leadingWhitespace = 0;
-    let hasTabs = false;
-    let hasSpaces = false;
-    let firstNonWs = -1;
-
-    for (let c = 0; c < rawLine.length; c += 1) {
-      if (rawLine[c] === " ") {
-        leadingWhitespace += 1;
-        hasSpaces = true;
-      } else if (rawLine[c] === "\t") {
-        leadingWhitespace += 4;
-        hasTabs = true;
-      } else {
-        firstNonWs = c;
-        break;
-      }
-    }
-
-    // Check for mixed tabs and spaces in indentation
-    if (hasTabs && hasSpaces && firstNonWs > 0) {
-      problems.push({
-        line: lineNum,
-        column: 1,
-        length: firstNonWs,
-        kind: "invalid-syntax",
-        message: "Gemischte Einrückung mit Tabs und Leerzeichen (TabError).",
-        severity: "warning",
-      });
-    }
-
-    // Strip comments and track multiline strings to get clean code tokens
-    let cleanCode = "";
-    let i = 0;
-    while (i < rawLine.length) {
-      if (inMultilineString) {
-        if (rawLine.startsWith(multilineQuote, i)) {
-          inMultilineString = false;
-          i += 3;
-        } else {
-          i += 1;
-        }
-        continue;
-      }
-
-      // Check opening of multiline string
-      if (rawLine.startsWith('"""', i) || rawLine.startsWith("'''", i)) {
-        multilineQuote = rawLine.slice(i, i + 3);
-        const closingIdx = rawLine.indexOf(multilineQuote, i + 3);
-        if (closingIdx !== -1) {
-          i = closingIdx + 3;
-        } else {
-          inMultilineString = true;
-          break;
-        }
-        continue;
-      }
-
-      // Check single-line string
-      if (rawLine[i] === '"' || rawLine[i] === "'") {
-        const q = rawLine[i];
-        let j = i + 1;
-        while (j < rawLine.length && rawLine[j] !== q) {
-          if (rawLine[j] === "\\" && j + 1 < rawLine.length) j += 1;
-          j += 1;
-        }
-        i = j + 1;
-        continue;
-      }
-
-      // Check comment
-      if (rawLine[i] === "#") {
-        break;
-      }
-
-      cleanCode += rawLine[i];
-      i += 1;
-    }
-
-    // Track brackets across lines for continuation
-    for (const char of cleanCode) {
-      if (char === "(" || char === "[" || char === "{") insideParentheses += 1;
-      else if (char === ")" || char === "]" || char === "}") insideParentheses = Math.max(0, insideParentheses - 1);
-    }
-
+  for (const statement of pythonLogicalLines(text)) {
+    const { line: lineNum, code: cleanCode, rawLine, indent: leadingWhitespace } = statement;
     const trimmed = cleanCode.trim();
-
-    // Skip empty lines or pure comments or lines inside multiline strings/brackets for block indentation
-    if (!trimmed || inMultilineString) {
-      continue;
-    }
-
-    // If inside brackets, Python allows arbitrary indentation
-    if (insideParentheses > 0) {
-      continue;
+    for (const bad of statement.badBackslashes) {
+      problems.push({ ...bad, kind: "invalid-syntax", message: "Nach dem Zeilenfortsetzungszeichen „\\“ darf kein Leerzeichen stehen.", severity: "error" });
     }
 
     // Check Polyglot typo: `else if`
@@ -648,33 +539,17 @@ export function findPythonSyntaxProblems(source: string): PythonSyntaxProblem[] 
       }
     }
 
-    // Compound statement colon checking
+    // A suite may follow the header on the same logical line. Colons in
+    // annotations, slices and dictionaries are nested and are not delimiters.
     if (COMPOUND_HEADER_PATTERN.test(trimmed)) {
       const keyword = extractCompoundKeyword(trimmed);
-
-      // If the statement ends with `:`
-      if (trimmed.endsWith(":")) {
-        // Check if there is code on the same line after the colon (e.g. `if x: return y` or `def f(): pass`)
-        const colonIdx = trimmed.lastIndexOf(":");
-        const beforeColon = trimmed.slice(0, colonIdx);
-        // If the only colon is at the end, and no statement followed on the same line:
-        if (beforeColon.trim().length > 0) {
-          expectIndentAfter = { line: lineNum, keyword };
-        }
+      const colon = pythonHeaderColon(trimmed);
+      const softName = /^(?:match|case)\b\s*(?:=|:)/.test(trimmed);
+      if (softName || ((keyword === "match" || keyword === "case") && colon < 0)) continue;
+      if (colon >= 0) {
+        if (!trimmed.slice(colon + 1).trim()) expectIndentAfter = { line: lineNum, keyword };
       } else {
-        // Statement did not end with a colon!
-        // Make sure it wasn't a continuation line ending with `\`
-        if (!rawLine.trimEnd().endsWith("\\")) {
-          const col = rawLine.length;
-          problems.push({
-            line: lineNum,
-            column: Math.max(1, col),
-            length: 1,
-            kind: "missing-colon",
-            message: `Doppelpunkt „:“ am Ende von „${keyword}“-Anweisung erwartet.`,
-            severity: "error",
-          });
-        }
+        problems.push({ line: lineNum, column: Math.max(1, rawLine.length), length: 1, kind: "missing-colon", message: `Doppelpunkt „:“ am Ende von „${keyword}“-Anweisung erwartet.`, severity: "error" });
       }
     }
   }

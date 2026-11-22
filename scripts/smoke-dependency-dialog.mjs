@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
+const adviceMode = process.argv.includes("--advice");
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "kiwi-dependency-dialog-"));
 const port = await new Promise((resolve) => {
   const server = net.createServer();
@@ -37,10 +38,12 @@ try {
         window.versionRequests = [];
         window.searches = [];
         window.added = [];
+        window.adviceRequests = [];
         createRoot(document.getElementById("root")).render(
           <DependencyDialog buildType="Maven" buildFiles={["/project/pom.xml"]}
             onSearch={async (query, source) => { window.searches.push({query, source}); return candidates.map(candidate => ({...candidate, sourceId:source || "central", sourceLabel:source || "Maven Central"})); }}
             onVersions={(group, artifact, source) => new Promise(resolve => window.versionRequests.push({artifact, source, resolve}))}
+            ${adviceMode ? 'onAdvice={(group, artifact, options) => new Promise(resolve => window.adviceRequests.push({artifact, options, resolve}))}' : ''}
             onAdd={async (target, scope, options) => { window.added.push({...target, sourceId:options.sourceId}); }}
             onClose={() => { window.closed = true; }}
           />
@@ -120,7 +123,22 @@ try {
   })`);
   await evaluate('document.querySelector(".dependency-result button").click()');
   assert.equal(await evaluate('window.versionRequests[0].source'), "fabric", "Versions came from a different source");
-  await evaluate('window.versionRequests[0].resolve(["1.9.0", "1.8.0"])');
+  if (adviceMode) {
+    await evaluate(`new Promise(resolve => { const wait=()=>window.adviceRequests.length ? resolve(true) : setTimeout(wait,20); wait(); })`);
+    assert(await evaluate('document.querySelector(".dependency-dialog .primary-button").disabled'), 'Add must wait for compatibility checking');
+    await evaluate(`(() => { const select=document.querySelector('.dependency-source-picker select'); select.value='sponge'; select.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+    await evaluate(`new Promise(resolve => { const wait=()=>window.searches.at(-1)?.source==='sponge' && document.querySelectorAll('.dependency-result').length===30 ? resolve(true):setTimeout(wait,20); wait(); })`);
+    await evaluate('document.querySelector(".dependency-result button").click()');
+    await evaluate(`new Promise(resolve => { const wait=()=>window.adviceRequests.length===2 ? resolve(true):setTimeout(wait,20); wait(); })`);
+    await evaluate(`window.adviceRequests[0].resolve({recommendedVersion:'BAD-STALE-VERSION',versions:[],javaTarget:25,checkedAt:1})`);
+    await evaluate('window.versionRequests[0].resolve(["BAD-STALE-VERSION"])');
+    await evaluate('new Promise(resolve => setTimeout(resolve,40))');
+    assert(!(await evaluate('document.querySelector(".dependency-dialog").textContent.includes("BAD-STALE-VERSION")')), 'A stale recommendation replaced the active source');
+    await evaluate(`window.adviceRequests[1].resolve({javaTarget:17,minecraftTarget:null,currentVersion:'1.8.0',recommendedVersion:'1.9.0',checkedAt:1,versions:[{version:'2.0.0-'+'release'.repeat(35),status:'incompatible',requiredJava:25,reasons:['Requires Java 25'],notes:[]},{version:'1.9.0',status:'compatible',requiredJava:17,reasons:[],notes:[]}]})`);
+    await evaluate('new Promise(resolve => setTimeout(resolve,40))');
+    assert(await evaluate('document.querySelector(".dependency-dialog .primary-button").disabled'), 'An incompatible version must be marked before adding');
+  }
+  await evaluate('window.versionRequests.at(-1).resolve(["1.9.0", "1.8.0"])');
   await evaluate('new Promise(resolve => setTimeout(resolve, 50))');
   const layout = await evaluate(`(() => {
     const dialog=document.querySelector(".dependency-dialog");
@@ -144,10 +162,16 @@ try {
     return {prevented:event.defaultPrevented, requests:window.versionRequests.length};
   })()`);
   assert.equal(keyboard.prevented, false, "Version keys were stolen by result navigation");
-  assert.equal(keyboard.requests, 1, "Changing version selected a different dependency");
+  assert.equal(keyboard.requests, adviceMode ? 2 : 1, "Changing version selected a different dependency");
+  if (adviceMode) {
+    await evaluate('document.querySelector(".dependency-advice button").click()');
+    await evaluate('new Promise(resolve => setTimeout(resolve,40))');
+    assert.equal(await evaluate('document.querySelector("footer select").value'), '1.9.0');
+  }
   await evaluate('document.querySelector(".dependency-dialog .primary-button").click()');
   assert.deepEqual(await evaluate('window.added.map(entry => entry.artifactId)'), ["library-0"]);
-  assert.equal(await evaluate('window.added[0].sourceId'), "fabric", "Import lost the selected repository");
+  assert.equal(await evaluate('window.added[0].sourceId'), adviceMode ? "sponge" : "fabric", "Import lost the selected repository");
+  if (adviceMode) assert.equal(await evaluate('window.added[0].version'), '1.9.0');
   console.log("Dependency selection passed: source filter, matching versions, action bar, keyboard and repository-aware import.");
 } finally {
   socket?.close();

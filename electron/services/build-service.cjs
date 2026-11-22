@@ -28,6 +28,7 @@ class BuildService {
     // outside keeps its entries on disk; one made here does not, which is
     // what a test wants.
     this.taskCache = taskCache || new BuildTaskCache();
+    this.taskReads = new Map();
   }
 
   resolveBuildTool(root, type, preferWrapper = true) {
@@ -507,6 +508,14 @@ class BuildService {
    * eventually has to restart the IDE to get past.
    */
   async listTasks(root, { refresh = false } = {}) {
+    root = this.pathGuard.assertWorkspace(root);
+    if (this.taskReads.has(root)) return this.taskReads.get(root);
+    const job = this.readCachedTasks(root, { refresh }).finally(() => this.taskReads.delete(root));
+    this.taskReads.set(root, job);
+    return job;
+  }
+
+  async readCachedTasks(root, { refresh = false } = {}) {
     if (!refresh) {
       const stored = await this.taskCache.get(root);
       if (stored) return stored;

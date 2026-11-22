@@ -10,6 +10,7 @@ function spawnCapture(command, args, options = {}) {
       windowsHide: true,
       windowsVerbatimArguments: prepared.verbatim,
     });
+    options.onSpawn?.(child);
     let timeout;
     let timedOut = false;
     let stdout = "";
