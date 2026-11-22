@@ -29,7 +29,7 @@ if [ "$platform" = darwin ]; then
   if ! /usr/bin/open -n "$target" --args --updated; then
     mv "$target" "$payload"
     mv "$backup" "$target"
-    /usr/bin/open -n "$target" --args --kiwi-update-failed
+    /usr/bin/open -n "$target" --args --update-failed
     exit 1
   fi
 else
