@@ -7,10 +7,18 @@ param(
     [Parameter(Mandatory = $true)][string]$SuccessArgsBase64,
     [Parameter(Mandatory = $true)][string]$FailureArgsBase64,
     [Parameter(Mandatory = $true)][string]$LogPath,
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [int]$KiwiParentProcessId = 0,
+    [string]$KiwiReadyPath,
+    [string]$KiwiCommitPath,
+    [string]$KiwiCancelPath,
+    [string]$KiwiResultPath,
+    [string]$KiwiRequestId,
+    [string]$ExpectedVersion
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-handoff.ps1')
 
 function Write-KiwiUpdateLog([string]$Message) {
     try {
@@ -83,7 +91,7 @@ function Start-KiwiProcess {
         PassThru = $true
     }
     if ($Arguments.Count -gt 0) { $parameters.ArgumentList = Join-KiwiCommandLine $Arguments }
-    if ($Wait) { $parameters.Wait = $true }
+    if ($Wait) { $parameters.Wait = $true; $parameters.WindowStyle = 'Hidden' }
     return Start-Process @parameters
 }
 
@@ -112,11 +120,17 @@ function Start-KiwiFallback([string[]]$Arguments, [string]$Reason) {
 try {
     Assert-KiwiInstaller
     if (-not [IO.File]::Exists($FallbackExecutablePath)) { throw "Die bisherige Kiwi-EXE fehlt." }
+    Wait-KiwiParentExit
     $installerArguments = Read-KiwiArguments $InstallerArgsBase64
     $successArguments = Read-KiwiArguments $SuccessArgsBase64
     Write-KiwiUpdateLog "Setup-Update wird gestartet."
     $installer = Start-KiwiProcess -ExecutablePath $InstallerPath -Arguments $installerArguments -Wait
     if ($installer.ExitCode -ne 0) { throw "Der Setup-Installer wurde mit Code $($installer.ExitCode) beendet." }
+    if ($ExpectedVersion) {
+        $installedVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($FallbackExecutablePath).ProductVersion
+        if ($installedVersion -ne $ExpectedVersion) { throw "Die installierte Version ist $installedVersion statt $ExpectedVersion. Das Update wurde nicht angewendet." }
+    }
+    Write-KiwiUpdateResult 'installed' 'Setup-Update erfolgreich installiert.'
 
     # NSIS receives --force-run as well. Starting once more is intentional:
     # Kiwi's single-instance lock turns this into a harmless focus request if
@@ -124,6 +138,7 @@ try {
     Start-KiwiFallback $successArguments "Setup-Update erfolgreich installiert; Kiwi wurde automatisch wieder geöffnet."
     exit 0
 } catch {
+    Write-KiwiUpdateResult 'failed' $_.Exception.Message
     Write-KiwiUpdateLog "Setup-Update fehlgeschlagen: $($_.Exception.Message)"
     try {
         $failureArguments = Read-KiwiArguments $FailureArgsBase64

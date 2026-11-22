@@ -1,13 +1,13 @@
 {
   "name": "kiwi-ide",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "author": "Kiwi IDE Contributors",
   "description": "A focused desktop IDE for Java, Kotlin, Python, Rust, PHP, Lua, Go and the C family.",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
-    "build": "npm run build:compile && npm run test:hot-update && npm run test:layout && npm run test:preload && npm run test:e2e:repeat",
+    "build": "npm run build:compile && npm run test:hot-update && npm run test:layout && npm run test:preload && npm run test:update-handoff && npm run test:e2e:repeat",
     "build:compile": "npm run icons && npm run debug-adapter && tsc --noEmit && vite build",
     "icons": "node scripts/build-icons.mjs && node scripts/build-installer-art.mjs",
     "debug-adapter": "node scripts/build-debug-adapter.mjs",
@@ -34,6 +34,7 @@
     "test:application-icon": "node scripts/smoke-application-icon.mjs",
     "test:workbench-tools": "node scripts/smoke-polyglot-editor.mjs --workbench-tools-only",
     "test:github-actions": "node scripts/smoke-github-actions.mjs",
+    "test:update-handoff": "node scripts/smoke-update-handoff.mjs",
     "test:preload": "node scripts/smoke-startup-preload.mjs",
     "test:e2e:repeat": "node scripts/repeat-e2e.mjs",
     "test:e2e:packaged": "node scripts/smoke-electron.mjs --packaged",
@@ -142,6 +143,10 @@
       {
         "from": "resources/update-helper/setup-update.ps1",
         "to": "update-helper/setup-update.ps1"
+      },
+      {
+        "from": "resources/update-helper/windows-handoff.ps1",
+        "to": "update-helper/windows-handoff.ps1"
       }
     ],
     "win": {

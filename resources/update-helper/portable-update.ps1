@@ -5,10 +5,18 @@ param(
     [Parameter(Mandatory = $true)][long]$ExpectedBytes,
     [Parameter(Mandatory = $true)][string]$RelaunchArgsBase64,
     [Parameter(Mandatory = $true)][string]$LogPath,
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [int]$KiwiParentProcessId = 0,
+    [string]$KiwiReadyPath,
+    [string]$KiwiCommitPath,
+    [string]$KiwiCancelPath,
+    [string]$KiwiResultPath,
+    [string]$KiwiRequestId,
+    [string]$ExpectedVersion
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-handoff.ps1')
 $backupPath = "$TargetPath.kiwi-backup"
 $deadline = [DateTime]::UtcNow.AddSeconds(120)
 
@@ -157,6 +165,7 @@ try {
     Write-KiwiUpdateLog "Portable Update wird vorbereitet."
     Assert-KiwiFile $StagedPath
     if (-not [IO.File]::Exists($TargetPath)) { throw "Die bisherige portable Kiwi-EXE fehlt." }
+    Wait-KiwiParentExit
     if ([IO.File]::Exists($backupPath)) { [IO.File]::Delete($backupPath) }
 
     $replaced = $false
@@ -197,14 +206,17 @@ try {
     }
 
     if (-not $NoLaunch) {
+        Write-KiwiUpdateResult 'installed' 'Portable Update erfolgreich installiert.'
         $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgsBase64))
         $arguments = @((ConvertFrom-Json -InputObject $decoded))
         Start-KiwiProcess $TargetPath $arguments
     }
     if ([IO.File]::Exists($backupPath)) { [IO.File]::Delete($backupPath) }
     Write-KiwiUpdateLog "Portable Update erfolgreich installiert."
+    Write-KiwiUpdateResult 'installed' 'Portable Update erfolgreich installiert.'
     exit 0
 } catch {
+    Write-KiwiUpdateResult 'failed' $_.Exception.Message
     Write-KiwiUpdateLog "Portable Update fehlgeschlagen: $($_.Exception.Message)"
     if ([IO.File]::Exists($backupPath)) {
         try {

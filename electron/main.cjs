@@ -6,6 +6,7 @@ const { DependencyCompatibilityService } = require("./services/dependency-compat
 const { GitHubActionsService } = require("./services/github-actions-service.cjs");
 const { StructuralSearchService } = require("./services/structural-search-service.cjs");
 const { EditorMacroStore } = require("./services/editor-macro-store.cjs");
+const { startWindowsUpdateHandoff } = require("./services/windows-update-handoff.cjs");
 const { prepareUnixUpdate, discardUnixUpdate } = require("./services/unix-update-service.cjs");
 const fsp = require("node:fs/promises");
 const crypto = require("node:crypto");
@@ -217,13 +218,21 @@ let shutdownComplete = false;
 let reopeningHub = false;
 let pendingUpdateLaunch = null;
 let updateInstallPromise = null;
+function updateFailureReason() {
+  const fallback = "Das Update konnte nicht installiert werden. Die bisherige Kiwi-Version und der Workspace wurden automatisch wieder geöffnet.";
+  try {
+    const result = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "updates", "last-update-result.json"), "utf8"));
+    if (result.phase === "failed" && typeof result.message === "string") return `${fallback} ${result.message.slice(0, 1500)}`;
+  } catch { /* Older helpers only wrote a text log. */ }
+  return fallback;
+}
 let updateRuntimeState = {
   status: UPDATE_FAILED_LAUNCH ? "error" : UPDATED_LAUNCH ? "installed" : "idle",
   currentVersion: app.getVersion(),
   version: UPDATED_LAUNCH ? app.getVersion() : undefined,
   ...(UPDATE_FAILED_LAUNCH ? {
     operation: "install",
-    reason: "Das Update konnte nicht installiert werden. Die bisherige Kiwi-Version und der Workspace wurden automatisch wieder geöffnet.",
+    reason: updateFailureReason(),
   } : {}),
   updatedAt: new Date().toISOString(),
 };
@@ -2539,6 +2548,7 @@ function registerIpc() {
     updateInstallPromise = (async () => {
       let portableStage = null;
       let unixStage = null;
+      let windowsHandoff = null;
       try {
         if (shutdownStarted) throw new Error("Kiwi wird bereits beendet; das Update wurde nicht gestartet.");
         publishUpdateState("downloading", { version: update?.version });
@@ -2589,33 +2599,20 @@ function registerIpc() {
         if (shutdownStarted) throw new Error("Kiwi wird bereits beendet; das Update wurde nicht gestartet.");
 
         publishUpdateState("installing", { version: downloaded.version });
-        pendingUpdateLaunch = portableStage
-          ? {
-            kind: "portable",
-            command: "powershell.exe",
-            args: portableHelperArguments(
-              portableUpdateHelperPath(),
-              portableStage,
-              path.join(app.getPath("userData"), "updates", "portable-update.log"),
-            ),
-            cwd: path.dirname(portableStage.targetPath),
-            version: downloaded.version,
-            portableStage,
-          }
-          : {
-            kind: "setup",
-            command: "powershell.exe",
-            args: setupHelperArguments(
-              setupUpdateHelperPath(),
-              downloaded.path,
-              process.execPath,
-              path.join(app.getPath("userData"), "updates", "setup-update.log"),
-              nsisUpdateArguments(),
-              { sha256: downloaded.sha256, bytes: downloaded.bytes },
-            ),
-            cwd: path.dirname(downloaded.path),
-            version: downloaded.version,
-          };
+        windowsHandoff = await startWindowsUpdateHandoff({
+          userData: app.getPath("userData"),
+          helperPath: portableStage ? portableUpdateHelperPath() : setupUpdateHelperPath(),
+          buildArguments: helperPath => [
+            ...(portableStage
+              ? portableHelperArguments(helperPath, portableStage, path.join(app.getPath("userData"), "updates", "portable-update.log"))
+              : setupHelperArguments(helperPath, downloaded.path, process.execPath,
+                path.join(app.getPath("userData"), "updates", "setup-update.log"),
+                nsisUpdateArguments(), { sha256: downloaded.sha256, bytes: downloaded.bytes })),
+            "-ExpectedVersion", downloaded.version,
+          ],
+        });
+        if (shutdownStarted) throw new Error("Kiwi wird bereits beendet; das Update wurde nicht gestartet.");
+        pendingUpdateLaunch = { kind: portableStage ? "portable" : "setup", started: true, version: downloaded.version, pid: windowsHandoff.pid };
         publishUpdateState("restarting", {
           version: downloaded.version,
           reason: "Das Update wird still installiert; Kiwi startet danach automatisch wieder.",
@@ -2625,6 +2622,7 @@ function registerIpc() {
         setTimeout(() => app.quit(), 125);
         return { ...downloaded, relaunching: true };
       } catch (error) {
+        await windowsHandoff?.cancel();
         await discardPortableStage(portableStage);
         await discardUnixUpdate(unixStage).catch(() => undefined);
         pendingUpdateLaunch = null;
@@ -2735,14 +2733,13 @@ app.on("before-quit", (event) => {
   });
 });
 
-// Launch only after Electron has closed every BrowserWindow and the
-// before-quit cleanup has stopped terminals, builds, JDT and the debugger.
-// Starting the installer earlier races NSIS against files and child processes
-// that Kiwi still owns. `--force-run` performs the relaunch for the user.
+// Windows already has an acknowledged helper waiting for this process to exit.
+// Unix keeps its existing post-quit launcher path.
 app.on("will-quit", () => {
   const update = pendingUpdateLaunch;
   if (!update) return;
   pendingUpdateLaunch = null;
+  if (update.started) return;
   try {
     const installer = spawn(update.command, update.args, {
       cwd: update.cwd,
